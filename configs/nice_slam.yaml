@@ -39,7 +39,7 @@ tracking:
   gt_camera: False
   lr: 0.001
   pixels: 200
-  iters: 10
+  iters: 1 # 60
 mapping:
   device: "cuda:0"
   color_refine: True
@@ -67,7 +67,7 @@ mapping:
   lr_factor: 1
   pixels: 1000
   iters_first: 1500
-  iters: 60
+  iters: 100 #60
   stage:
     coarse:
       decoders_lr: 0.0
