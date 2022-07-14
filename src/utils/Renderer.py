@@ -227,7 +227,7 @@ class Renderer(object):
             color_list = []
 
             ray_batch_size = self.ray_batch_size
-            gt_depth = gt_depth.reshape(-1)
+
 
             for i in range(0, rays_d.shape[0], ray_batch_size):
                 rays_d_batch = rays_d[i:i+ray_batch_size]
@@ -236,6 +236,7 @@ class Renderer(object):
                     ret = self.render_batch_ray(
                         c, decoders, rays_d_batch, rays_o_batch, device, stage, gt_depth=None)
                 else:
+                    gt_depth = gt_depth.reshape(-1)
                     gt_depth_batch = gt_depth[i:i+ray_batch_size]
                     ret = self.render_batch_ray(
                         c, decoders, rays_d_batch, rays_o_batch, device, stage, gt_depth=gt_depth_batch)

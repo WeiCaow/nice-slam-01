@@ -3,7 +3,8 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from src.common import get_camera_from_tensor
-
+from src.utils.metrics import metrics
+from src.utils.candidate_renderer import headless_render,headless_render_cadidate,candidate_generate
 
 class Visualizer(object):
     """
@@ -49,6 +50,23 @@ class Visualizer(object):
                     c2w = torch.cat([c2w, bottom], dim=0)
                 else:
                     c2w = c2w_or_camera_tensor
+
+                # candidate_generate_list = candidate_generate(c2w, move=10)
+
+                # import matplotlib.pyplot as plt
+                # candidate_generate_list = candidate_generate(c2w, move=10)
+                #
+                # depth, uncertainty, color = self.renderer.render_img(
+                #     c,
+                #     decoders,
+                #     candidate_generate_list[0],
+                #     self.device,
+                #     stage='color',
+                #     gt_depth=gt_depth)
+                # depth_np = depth.detach().cpu().numpy()
+                # color_np = color.detach().cpu().numpy()
+                # plt.imshow(color_np)
+                # plt.show()
 
                 depth, uncertainty, color = self.renderer.render_img(
                     c,

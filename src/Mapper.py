@@ -11,7 +11,7 @@ from src.common import (get_camera_from_tensor, get_samples,
                         get_tensor_from_camera, random_select)
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
-
+from src.utils.metrics import metrics
 
 class Mapper(object):
     """
@@ -88,6 +88,8 @@ class Mapper(object):
             self.visualizer = Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
                                          vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
                                          verbose=self.verbose, device=self.device)
+            self.metrics = metrics(metrics_dir=os.path.join(self.output, 'metrics'), renderer=self.renderer,
+                                   verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
@@ -424,8 +426,14 @@ class Mapper(object):
                     optimizer.param_groups[1]['lr'] = self.BA_cam_lr
 
             if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output):
-                self.visualizer.vis(
-                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.decoders)
+                # self.visualizer.vis(
+                #     idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.decoders)
+                # self.visualizer.vis(
+                #     idx, joint_iter, cur_gt_depth, cur_gt_color, gt_cur_c2w, self.c, self.decoders)
+                
+                # if idx!=0 and joint_iter == self.num_joint_iters-1:
+                if idx > 0 and self.stage != "coarse" and joint_iter == self.num_joint_iters-1:
+                    self.metrics.gen(idx, cur_gt_depth, gt_cur_c2w, self.c, self.decoders)
 
             optimizer.zero_grad()
             batch_rays_d_list = []
@@ -604,6 +612,10 @@ class Mapper(object):
 
                 _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
                                       gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
+
+                # _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
+                #                       gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w= gt_c2w)
+                
                 if self.BA:
                     cur_c2w = _
                     self.estimate_c2w_list[idx] = cur_c2w
