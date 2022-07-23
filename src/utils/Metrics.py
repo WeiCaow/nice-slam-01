@@ -1,4 +1,5 @@
 import os
+from shutil import move
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,52 +8,70 @@ from src.utils.candidate_renderer import *
 import open3d as o3d
 import cv2
 import pandas as pd
+from PIL import Image
 
-class metrics(object):
+class Metrics(object):
     """
     Generate values of different metrics
     """
-    def __init__(self, metrics_dir, renderer, verbose, device='cuda:0'):
+    def __init__(self, metrics_dir, move, renderer, verbose, device='cuda:0'):
         self.device = device
         self.metrics_dir = metrics_dir
+        self.move = move
         self.verbose = verbose
         self.renderer = renderer
         os.makedirs(f'{metrics_dir}', exist_ok=True)
 
-    def gen(self, idx,gt_depth, c2w, c, decoders):
+    def gen(self, idx, gt_depth, c2w, c, decoders):
 
-        candidate_generate_list = candidate_generate(c2w, move=10)
+        print("begin rendering with larger FoV...")
+        depth, uncertainty, color = self.renderer.render_img_metric(
+            c,
+            decoders,
+            c2w,
+            self.device,
+            stage='color'
+            # gt_depth=gt_depth
+            )
+
+        depth_np = depth.detach().cpu().numpy()
+        color_np = color.detach().cpu().numpy()
+        color_np = np.clip(color_np, 0, 1)
+
+
+        save_dir = os.path.join(self.metrics_dir, f'{idx:05d}')
+        os.makedirs(f'{save_dir}', exist_ok=True)
+        
+        np.save(os.path.join(save_dir, f'render_depth_large_scale.npy'),depth_np)
+        np.save(os.path.join(save_dir, f'render_rgb_large_scale.npy'),color_np)
+            
+        plt.imsave(os.path.join(save_dir, f'render_rgb_bigFoV.png'),color_np)
+        plt.imsave(os.path.join(save_dir, f'render_depth_bigFoV.png'),depth_np)
+
+        print(f"begin rendering with candidate with each {self.move} degree rotation...")
+        candidate_generate_list = candidate_generate(c2w, move=self.move)
         candidate = ["x+Degree", "x-Degree", "y-Degree", "y+Degree"]
         render_depth_list = []
         render_color_list = []
 
-        for i, ca in enumerate(candidate):
+        for i, ca in enumerate(candidate):   
             depth, uncertainty, color = self.renderer.render_img(
-                c,
-                decoders,
-                candidate_generate_list[i + 1],
-                self.device,
-                stage='color',
-                gt_depth=gt_depth
-                )
+            c,
+            decoders,
+            candidate_generate_list[i + 1],
+            self.device,
+            stage='color'
+            )
 
-            uncertainty_np = uncertainty.detach().cpu().numpy()
             depth_np = depth.detach().cpu().numpy()
             color_np = color.detach().cpu().numpy()
-            color_np = np.clip(color_np, 0, 1)*255
+            color_np = np.clip(color_np, 0, 1)
 
-            
-            # cv2.normalize(depth_np, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-
-            save_dir = os.path.join(self.metrics_dir, f'{idx:05d}')
-            os.makedirs(f'{save_dir}', exist_ok=True)
-            cv2.imwrite(os.path.join(save_dir, f'render_uncertainty_{ca}.png'), uncertainty_np)
-            cv2.imwrite(os.path.join(save_dir, f'render_depth_{ca}.png'), cv2.normalize(depth_np, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1))
-            # when you read it remember add -1 to depth to keep one channel
-            color_np_cv2 = cv2.cvtColor(color_np, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(save_dir, f'render_rgb_{ca}.jpg'), color_np_cv2)
-            render_depth_list.append(depth_np)
             render_color_list.append(color_np)
+            render_depth_list.append(depth_np)
+
+            plt.imsave(os.path.join(save_dir, f'render_rgb_{ca}.png'),color_np)
+            plt.imsave(os.path.join(save_dir, f'render_depth_{ca}.png'),depth_np)
 
         df = pd.DataFrame(columns=[
             "FFT(size:10)_RGB","FFT(size:20)_RGB",
@@ -190,4 +209,4 @@ class metrics(object):
                 "LAPV_RGB","LAPV_Depth"
             ]
             df = df.append(s, ignore_index=True)
-        df.to_csv(os.path.join(self.metrics_dir, f'{idx:05d}.csv'))
+        df.to_csv(os.path.join(save_dir, f'{idx:05d}.csv'))

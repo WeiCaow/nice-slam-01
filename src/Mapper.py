@@ -11,7 +11,7 @@ from src.common import (get_camera_from_tensor, get_samples,
                         get_tensor_from_camera, random_select)
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
-from src.utils.metrics import metrics
+from src.utils.Metrics import Metrics
 
 class Mapper(object):
     """
@@ -88,7 +88,7 @@ class Mapper(object):
             self.visualizer = Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
                                          vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
                                          verbose=self.verbose, device=self.device)
-            self.metrics = metrics(metrics_dir=os.path.join(self.output, 'metrics'), renderer=self.renderer,
+            self.metrics = Metrics(metrics_dir=os.path.join(cfg["data"]["input_folder"], 'render'), move = cfg["candidate"]["move"], renderer=self.renderer,
                                    verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 

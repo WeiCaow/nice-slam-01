@@ -182,7 +182,7 @@ class ScanNet(BaseDataset):
     def __init__(self, cfg, args, scale, device='cuda:0'
                  ):
         super(ScanNet, self).__init__(cfg, args, scale, device)
-        self.input_folder = os.path.join(self.input_folder, 'frames')
+        self.input_folder = os.path.join(self.input_folder)
         self.color_paths = sorted(glob.glob(os.path.join(
             self.input_folder, 'color', '*.jpg')), key=lambda x: int(os.path.basename(x)[:-4]))
         self.depth_paths = sorted(glob.glob(os.path.join(

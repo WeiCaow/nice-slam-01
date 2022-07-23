@@ -20,6 +20,13 @@ class alexnet(pl.LightningModule):
       self.model.fc = nn.Linear(512, self.hparams["num_classes"])
  
 
+      dataset = MyDataset(self.hparams["data_dir"])
+      train_size = int(len(dataset) * 0.8)
+      val_size = int(len(dataset) * 0.1)
+      test_size = len(dataset) - train_size - val_size
+      self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
+
     def forward(self, x):
 
       x = self.model(x)
@@ -47,7 +54,7 @@ class alexnet(pl.LightningModule):
       self.log('acc', acc)
 
 
-      return {'loss': loss}
+      return {'loss': loss,'acc': acc}
 
     def validation_step(self, batch, batch_idx):
       images, targets = batch
@@ -84,13 +91,13 @@ class alexnet(pl.LightningModule):
         return optim
 
     def train_dataloader(self):
-        return DataLoader(MyDataset("Datasets/scannet/scans/scene0000_00/nbv_data_train.txt"), batch_size=self.hparams["batch_size"],shuffle = True,num_workers=4,drop_last=True)
+        return DataLoader(self.train_dataset, batch_size=self.hparams["batch_size"],shuffle = True,num_workers=4,drop_last=True)
 
     def val_dataloader(self):
-        return DataLoader(MyDataset("Datasets/scannet/scans/scene0000_00/nbv_data_val.txt"), batch_size=self.hparams["batch_size"],shuffle = False,num_workers=4,drop_last=True)
+        return DataLoader(self.val_dataset, batch_size=self.hparams["batch_size"],shuffle = False,num_workers=4,drop_last=True)
     
     def test_dataloader(self):
-        return DataLoader(MyDataset("Datasets/scannet/scans/scene0000_00/nbv_data_test.txt"), batch_size=self.hparams["batch_size"])
+        return DataLoader(self.test_dataset, batch_size=self.hparams["batch_size"])
 
     def getTestAcc(self, loader = None):
         self.model.eval()

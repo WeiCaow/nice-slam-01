@@ -2,11 +2,15 @@ import os
 import glob
 import pandas as pd
 import numpy as np
-nbv_dir = "Datasets/scannet/scans/scene0000_00/frames/nbv"
-metrics_dir = "output/scannet/scans/scene0000_00/metrics"
+nbv_dir = "Datasets/scannet/scans/scene0000_00/nbv"
+metrics_dir = "Datasets/scannet/scans/scene0000_00/render"
 
 def compare(nbv_dir,metrics_dir):
-  metrics_path = sorted(glob.glob(os.path.join(metrics_dir, '*.csv')),
+  metrics_path = []
+  for root, dirs, files in os.walk(metrics_dir):
+    for dir in dirs:
+       metrics_path.append(os.path.join(metrics_dir,dir, f'{dir}.csv'))
+  metrics_path = sorted(metrics_path,
                         key=lambda x: int(os.path.basename(x)[:-4]))
   top_1 = []
   top_2 = []
@@ -21,7 +25,7 @@ def compare(nbv_dir,metrics_dir):
     # top_20 = np.logical_or.reduce(nbv[:2,:]==metric_order[:2,:],axis = 0)
     # top_21 = np.logical_or.reduce(nbv[:2,:][[1,0],:]==metric_order[:2,:],axis = 0)
     top_2.append((nbv[0,:]== metric_order[0,:])|(nbv[0,:]== metric_order[1,:]))
-    if i >  200 :
+    if i >  100 :
       break
   
   top_1 = np.mat(top_1)

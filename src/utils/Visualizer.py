@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from src.common import get_camera_from_tensor
-from src.utils.metrics import metrics
+from src.utils.Metrics import Metrics
 from src.utils.candidate_renderer import headless_render,headless_render_cadidate,candidate_generate
 
 class Visualizer(object):

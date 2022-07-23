@@ -581,14 +581,14 @@ if __name__ == '__main__':
             [3.2563e-01, -4.0164e-01, 8.5595e-01, 2.9783e+00],
             [2.2132e-03, 9.0561e-01, 4.2410e-01, 1.3619e+00],
             [0.0000e+00, 0.0000e+00, 0.0000e+00, 1.0000e+00]])
-    n, volu = headless_render(mesh, test)
-    # path = 'output/scannet/scans/scene0000_00/tracking_vis/00005_0000'
-    print("original:",np.asarray(volu.extract_point_cloud().points).shape[0])
-    list = candidate_generate(c2w.cuda(), move=30)
-    # print(list[0])
-    # # print(list[1])
-    voly_t = copy.deepcopy(volu)
-    pcd_num,_,_= headless_render_cadidate(mesh, list, v=voly_t)
-    print(pcd_num)
-    print("after:", np.asarray(volu.extract_point_cloud().points).shape[0])
+    # n, volu = headless_render(mesh, test)
+    # # path = 'output/scannet/scans/scene0000_00/tracking_vis/00005_0000'
+    # print("original:",np.asarray(volu.extract_point_cloud().points).shape[0])
+    # list = candidate_generate(c2w.cuda(), move=30)
+    # # print(list[0])
+    # # # print(list[1])
+    # voly_t = copy.deepcopy(volu)
+    # pcd_num,_,_= headless_render_cadidate(mesh, list, v=voly_t)
+    # print(pcd_num)
+    # print("after:", np.asarray(volu.extract_point_cloud().points).shape[0])
    

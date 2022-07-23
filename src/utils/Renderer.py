@@ -1,5 +1,7 @@
+from ast import Try
 import torch
-from src.common import get_rays, raw2outputs_nerf_color, sample_pdf
+import numpy as np
+from src.common import get_rays, get_rays_metric, raw2outputs_nerf_color, sample_pdf
 
 
 class Renderer(object):
@@ -19,6 +21,7 @@ class Renderer(object):
         self.bound = slam.bound
 
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
+
 
     def eval_points(self, p, decoders, c=None, stage='color', device='cuda:0'):
         """
@@ -66,7 +69,7 @@ class Renderer(object):
 
         Args:
             c (dict): feature grids.
-            decoders (nn.module): decoders.
+            decoders (nn.module): decoders.     
             rays_d (tensor, N*3): rays direction.
             rays_o (tensor, N*3): rays origin.
             device (str): device name to compute on.
@@ -255,6 +258,64 @@ class Renderer(object):
             color = color.reshape(H, W, 3)
             return depth, uncertainty, color
 
+
+    def render_img_metric(self, c, decoders, c2w, device, stage, gt_depth=None):
+        """
+        Renders out depth, uncertainty, and color images with lager FoV.
+
+        Args:
+            c (dict): feature grids.
+            decoders (nn.module): decoders.
+            c2w (tensor): camera to world matrix of current frame.
+            device (str): device name to compute on.
+            stage (str): query stage.
+            gt_depth (tensor, optional): sensor depth image. Defaults to None.
+
+        Returns:
+            depth (tensor, H*W): rendered depth image.
+            uncertainty (tensor, H*W): rendered uncertainty image.
+            color (tensor, H*W*3): rendered color image.
+        """
+        with torch.no_grad():
+            H = int(np.tan(np.deg2rad(np.rad2deg(np.arctan(self.cy/self.fy))+10))*self.fy*2)
+            W = int(np.tan(np.deg2rad(np.rad2deg(np.arctan(self.cx/self.fx))+10))*self.fx*2)
+            rays_o, rays_d = get_rays_metric(
+                H, W, self.fx, self.fy, self.cx, self.cy, c2w, device)
+            rays_o = rays_o.reshape(-1, 3)
+            rays_d = rays_d.reshape(-1, 3)
+
+            depth_list = []
+            uncertainty_list = []
+            color_list = []
+
+            ray_batch_size = self.ray_batch_size
+
+
+            for i in range(0, rays_d.shape[0], ray_batch_size):
+                rays_d_batch = rays_d[i:i+ray_batch_size]
+                rays_o_batch = rays_o[i:i+ray_batch_size]
+                if gt_depth is None:
+                    ret = self.render_batch_ray(
+                        c, decoders, rays_d_batch, rays_o_batch, device, stage, gt_depth=None)
+                else:
+                    gt_depth = gt_depth.reshape(-1)
+                    gt_depth_batch = gt_depth[i:i+ray_batch_size]
+                    ret = self.render_batch_ray(
+                        c, decoders, rays_d_batch, rays_o_batch, device, stage, gt_depth=gt_depth_batch)
+
+                depth, uncertainty, color = ret
+                depth_list.append(depth.double())
+                uncertainty_list.append(uncertainty.double())
+                color_list.append(color)
+
+            depth = torch.cat(depth_list, dim=0)
+            uncertainty = torch.cat(uncertainty_list, dim=0)
+            color = torch.cat(color_list, dim=0)
+
+            depth = depth.reshape(H, W)
+            uncertainty = uncertainty.reshape(H, W)
+            color = color.reshape(H, W, 3)
+            return depth, uncertainty, color
     # this is only for imap*
     def regulation(self, c, decoders, rays_d, rays_o, gt_depth, device, stage='color'):
         """
