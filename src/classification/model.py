@@ -7,8 +7,10 @@ from torchvision import models
 import numpy as np
 import torch.nn.functional as F
 from pytorch_lightning.loggers import TensorBoardLogger
+from sklearn.metrics import classification_report
+import torchmetrics
 
-class alexnet(pl.LightningModule):
+class resnet(pl.LightningModule):
 
     def __init__(self, hparams):
       super().__init__()
@@ -17,15 +19,22 @@ class alexnet(pl.LightningModule):
 
       self.model  = models.resnet18(pretrained=True)
       self.model.conv1= nn.Conv2d(4, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-      self.model.fc = nn.Linear(512, self.hparams["num_classes"])
- 
+      self.model.fc = nn.Sequential(
+        nn.Linear(512, 128),
+        nn.ReLU(),
+        nn.Dropout(p=0.2),
+        nn.Linear(128, 32),
+        nn.ReLU(),
+        nn.Dropout(p=0.2),
+        nn.Linear(32, self.hparams["num_classes"])
+      )
 
       dataset = MyDataset(self.hparams["data_dir"])
-      train_size = int(len(dataset) * 0.8)
-      val_size = int(len(dataset) * 0.1)
+      train_size = int(len(dataset) * 0.6)
+      val_size = int(len(dataset) * 0.2)
       test_size = len(dataset) - train_size - val_size
-      self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [train_size, val_size, test_size])
-
+      self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [train_size, val_size, test_size],generator=torch.Generator().manual_seed(0))
+      self.accuracy = torchmetrics.Accuracy()
 
     def forward(self, x):
 
@@ -33,56 +42,65 @@ class alexnet(pl.LightningModule):
       return x
 
     def training_step(self, batch, batch_idx):
+        images, targets = batch
 
-      images, targets = batch
+        # Perform a forward pass on the network with inputs
+        out = self.forward(images)
 
-      # Perform a forward pass on the network with inputs
-      out = self.forward(images)
+        # calculate the loss with the network predictions and ground truth targets
+        loss = F.cross_entropy(out, targets)
 
-      # calculate the loss with the network predictions and ground truth targets
-      loss = F.cross_entropy(out, targets)
+        # Find the predicted class from probabilites of the image belonging to each of the classes
+        # from the network output
+        _, preds = torch.max(out, 1)
 
-      # Find the predicted class from probabilities of the image belonging to each of the classes
-      # from the network output
-      _, preds = torch.max(out, 1)
+        # Calculate the accuracy of predictions
+        acc = preds.eq(targets).sum().float() / targets.size(0)
 
-      # Calculate the accuracy of predictions
-      acc = preds.eq(targets).sum().float() / targets.size(0)
+        # Log the accuracy and loss values to the tensorboard
+        self.log('loss', loss)
+        
+        # Or also on the progress bar in our console/notebook
+        # if you want it to not show in tensorboard just disable
+        # the logger but usually you want to log everything :)
+        self.log('acc', acc, logger=True, prog_bar=True)
 
-      # Log the accuracy and loss values to the tensorboard
-      self.log('loss', loss)
-      self.log('acc', acc)
-
-
-      return {'loss': loss,'acc': acc}
+        # Ultimately we return the loss which will be then used
+        # for backpropagation in pytorch lightning automatically
+        # This will always be logged in the progressbar as well
+        return loss
 
     def validation_step(self, batch, batch_idx):
-      images, targets = batch
+        images, targets = batch
 
-      # Perform a forward pass on the network with inputs
-      out = self.forward(images)
+        # Perform a forward pass on the network with inputs
+        out = self.forward(images)
 
-      # calculate the loss with the network predictions and ground truth targets
-      loss = F.cross_entropy(out, targets)
+        # calculate the loss with the network predictions and ground truth targets
+        loss = F.cross_entropy(out, targets)
 
-      # Find the predicted class from probabilities of the image belonging to each of the classes
-      # from the network output
-      _, preds = torch.max(out, 1)
+        # Find the predicted class from probabilites of the image belonging to each of the classes
+        # from the network output
+        _, preds = torch.max(out, 1)
 
-      # Calculate the accuracy of predictions
-      acc = preds.eq(targets).sum().float() / targets.size(0)
+        # Calculate the accuracy of predictions
+        acc = preds.eq(targets).sum().float() / targets.size(0)
 
-      return {'val_loss': loss, 'val_acc': acc}
+        # Whatever we return here, we have access to in the 
+        # validation epoch end function. A dictionary is more
+        # ordered than a list or tuple
+        self.log("val_loss", loss, logger=True, prog_bar=True)
+        return {'val_loss': loss, 'val_acc': acc}
 
     def validation_epoch_end(self, outputs):
 
-      # Average the loss over the entire validation data from it's mini-batches
-      avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-      avg_acc = torch.stack([x['val_acc'] for x in outputs]).mean()
+        # Average the loss over the entire validation data from it's mini-batches
+        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
+        avg_acc = torch.stack([x['val_acc'] for x in outputs]).mean()
 
-      # Log the validation accuracy and loss values to the tensorboard
-      self.log('val_loss', avg_loss)
-      self.log('val_acc', avg_acc)
+        # Log the validation accuracy and loss values to the tensorboard
+        self.log('val_loss', avg_loss)
+        self.log('val_acc', avg_acc)
 
     def configure_optimizers(self):
 
@@ -99,7 +117,7 @@ class alexnet(pl.LightningModule):
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.hparams["batch_size"])
 
-    def getTestAcc(self, loader = None):
+    def getTest(self, loader = None):
         self.model.eval()
         self.model = self.model.to(self.device)
 
@@ -119,8 +137,9 @@ class alexnet(pl.LightningModule):
         labels = np.concatenate(labels, axis=0)
 
         preds = scores.argmax(axis=1)
-        acc = (labels == preds).mean()
-        return preds, acc
+        # acc = (labels == preds).mean()
+        print(classification_report(labels,preds))
+        return 0
 
 
 if __name__ == "__main__":

@@ -220,12 +220,14 @@ def varianceOfLaplacian(img, depth=True):
     return s[0]
 
 def pcd_integration(pcd,pcd_sum):
+    # print(np.array(pcd_sum.points).shape)
+    # print(np.array(pcd.points).shape)
     dists = pcd.compute_point_cloud_distance(pcd_sum)
     dists = np.asarray(dists)
-    ind = np.where(dists > 1e-2)[0]
-    pcd_sum = pcd.select_by_index(ind)+pcd_sum
+    ind = np.where(dists > 0.15e-1)[0]
+    pcd_sum_new = pcd.select_by_index(ind)+pcd_sum
     # print(np.array(pcd_sum.points).shape)
-    return pcd_sum
+    return pcd_sum_new
 
 def headless_render(mesh, camera_extrinsics,width = 620, height = 480):
     '''
@@ -384,7 +386,7 @@ def candidate_generate(camera_extrinsics_origin, move = int):
     origin = copy.deepcopy(camera_extrinsics_origin)
     # origin[:, 1] *= -1
     # origin[:, 2] *= -1
-    camera_extrinsics_list.append(origin)
+    # camera_extrinsics_list.append(origin)
 
     for i in range(4):
         camera_extrinsics_ca = copy.deepcopy(origin)
@@ -419,6 +421,37 @@ def candidate_generate(camera_extrinsics_origin, move = int):
         camera_extrinsics_list.append(camera_extrinsics_ca)
 
     # pcd_num = headless_render_cadidate(mesh,camera_extrinsics_list, history=False, volume=None)
+
+    return camera_extrinsics_list
+
+def candidate_generate_np(camera_extrinsics_origin, move = int):
+    '''  ["origin","x+0.2","x-0.2","y+0.2","y-0.2","z+0.2","z-0.2"]
+    '''
+
+    camera_extrinsics_list = []
+    origin = copy.deepcopy(camera_extrinsics_origin)
+    # origin[:, 1] *= -1
+    # origin[:, 2] *= -1
+
+    for i in range(4):
+        camera_extrinsics_ca = copy.deepcopy(origin)
+        if i==0:
+            # camera_extrinsics_ca[0, -1] = camera_extrinsics_ca[0, -1] + move
+            camera_extrinsics_ca[:3, :3] = camera_extrinsics_ca[:3,:3] @ o3d.geometry.get_rotation_matrix_from_axis_angle([math.radians(move), 0, 0])
+        elif i==1:
+            # camera_extrinsics_ca[0, -1] = camera_extrinsics_ca[0, -1] - move
+            camera_extrinsics_ca[:3,:3] = camera_extrinsics_ca[:3,:3] @ o3d.geometry.get_rotation_matrix_from_axis_angle([-math.radians(move),0,0])
+
+        elif i==2:
+            # camera_extrinsics_ca[1, -1] = camera_extrinsics_ca[1, -1] + move
+            camera_extrinsics_ca[:3,:3] = camera_extrinsics_ca[:3,:3] @ o3d.geometry.get_rotation_matrix_from_axis_angle([0, math.radians(move),0])
+
+        elif i==3:
+            # camera_extrinsics_ca[1, -1] = camera_extrinsics_ca[1, -1] - move
+            camera_extrinsics_ca[:3,:3] = camera_extrinsics_ca[:3,:3] @ o3d.geometry.get_rotation_matrix_from_axis_angle([0, -math.radians(move),0])
+
+
+        camera_extrinsics_list.append(camera_extrinsics_ca)
 
     return camera_extrinsics_list
 
@@ -481,19 +514,22 @@ def headless_pcd_ca_render(mesh, camera_extrinsics, pcd=None):
 
     pcd_ca_num = []
     for i in range(len(camera_extrinsics)):
-        camera_extrinsics[i] = camera_extrinsics[i].detach().cpu().numpy()
+        camera_extrinsics[i] = camera_extrinsics[i]
         camera_extrinsics[i][:3, 1] *= -1
         camera_extrinsics[i][:3, 2] *= -1
         camera_extrinsics[i] = np.linalg.inv(camera_extrinsics[i])
 
-    for i in range(1, len(camera_extrinsics)):
+    for i in range(len(camera_extrinsics)):
         render = o3d.visualization.rendering.OffscreenRenderer(
             620, 460, headless=True)
         mtl = o3d.visualization.rendering.MaterialRecord()
-        mtl.base_color = [1, 1, 1, 1]
+        # mtl.base_color = [1, 1, 1, 1]
+        # mtl.base_color = [0, 0, 0, 0]
+        # mtl.shader = "depth"
         mtl.shader = "defaultUnlit"
-        render.scene.set_background([0, 0, 0, 0])
+        # render.scene.set_background([0, 0, 0, 0])
         render.scene.add_geometry("model", mesh, mtl)
+
 
         pcd_ca = copy.deepcopy(pcd)
 
@@ -504,6 +540,8 @@ def headless_pcd_ca_render(mesh, camera_extrinsics, pcd=None):
         rgbd_ca = o3d.geometry.RGBDImage.create_from_color_and_depth(
             cimg_ca, dimg_ca, depth_scale=1, depth_trunc=4.0, convert_rgb_to_intensity=False)
 
+        cimg_ca = np.asarray(cimg_ca)
+
         volume = o3d.pipelines.integration.ScalableTSDFVolume(
             voxel_length=4.0 / 512.0,
             sdf_trunc=0.04,
@@ -512,12 +550,12 @@ def headless_pcd_ca_render(mesh, camera_extrinsics, pcd=None):
         volume.integrate(rgbd_ca,camera_intrinsics,camera_extrinsics[i])
 
         pcd_ca_new = volume.extract_point_cloud()
-        pcd_ca_new = pcd_integration(pcd_ca_new,pcd_ca)
+        pcd_ca_new_in = pcd_integration(pcd_ca_new,pcd_ca)
 
         # pcd_ca_new = pcd_ca_new + pcd_ca
 
         # pcd_ca_new = pcd_ca_new.voxel_down_sample(voxel_size=0.01)
-        num_pcd = np.asarray(pcd_ca_new.points).shape[0]
+        num_pcd = np.asarray(pcd_ca_new_in.points).shape[0]
         pcd_ca_num.append(num_pcd)
 
     return pcd_ca_num

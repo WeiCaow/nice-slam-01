@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-
+import open3d as o3d
+import math
 
 def as_intrinsics_matrix(intrinsics):
     """
@@ -266,6 +267,32 @@ def get_rays(H, W, fx, fy, cx, cy, c2w, device):
     return rays_o, rays_d
 
 
+
+# def get_rays_ca(H, W, fx, fy, cx, cy, c2w, device):
+    """
+    Get rays for a whole image.
+
+    """
+    if isinstance(c2w, np.ndarray):
+        c2w = torch.from_numpy(c2w)
+    # pytorch's meshgrid has indexing='ij'
+    i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))
+    i = i.t()  # transpose
+    j = j.t()
+    dirs = torch.stack(
+        [(i-cx)/fx, -(j-cy)/fy, -torch.ones_like(i)], -1).to(device)
+    dirs = dirs.reshape(H, W, 1, 3)
+    # Rotate ray directions from camera frame to the world frame
+    # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    
+    mat_ca = torch.tensor(o3d.geometry.get_rotation_matrix_from_axis_angle([math.radians(10), 0, 0])).float().cuda()
+
+    
+    rays_d = torch.sum(dirs * mat_ca[:3, :3], -1)
+    # rays_o = c2w[:3, -1].expand(rays_d.shape)
+    return rays_d
+
+
 def get_rays_metric(H, W, fx, fy, cx, cy, c2w, device):
     """
     Get rays for a whole image.
@@ -282,7 +309,7 @@ def get_rays_metric(H, W, fx, fy, cx, cy, c2w, device):
     # dh = 10/np.rad2deg(2*np.arctan(cy/fy))
 
     dirs = torch.stack(
-        [(i-int((W-640)/2)-cx)/fx, -(j-int((H-480)/2)-cy)/fy, -torch.ones_like(i)], -1).to(device)
+        [(i-int((W-620)/2)-cx)/fx, -(j-int((H-460)/2)-cy)/fy, -torch.ones_like(i)], -1).to(device)
         
     dirs = dirs.reshape(H, W, 1, 3)
     # Rotate ray directions from camera frame to the world frame

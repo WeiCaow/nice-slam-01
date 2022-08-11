@@ -38,7 +38,7 @@ class Visualizer(object):
             decoders (nn.module): decoders.
         """
         with torch.no_grad():
-            if (idx % self.freq == 0) and (iter % self.inside_freq == 0):
+            if True:#(idx % self.freq == 0) and (iter % self.inside_freq == 0):
                 gt_depth_np = gt_depth.cpu().numpy()
                 gt_color_np = gt_color.cpu().numpy()
                 if len(c2w_or_camera_tensor.shape) == 1:

@@ -164,7 +164,7 @@ class Tracker(object):
                 if idx > 0 and (idx % self.every_frame == 1 or self.every_frame == 1):
                     while self.mapping_idx[0] != idx-1:
                         time.sleep(0.1)
-                    pre_c2w = self.estimate_c2w_list[idx-1].to(device)
+                    # pre_c2w = self.estimate_c2w_list[idx-1].to(device)
             elif self.sync_method == 'loose':
                 # mapping idx can be later than tracking idx is within the bound of
                 # [-self.every_frame-self.every_frame//2, -self.every_frame+self.every_frame//2]
@@ -174,7 +174,7 @@ class Tracker(object):
                 # pure parallel, if mesh/vis happens may cause inbalance
                 pass
 
-            self.update_para_from_mapping()
+            # self.update_para_from_mapping()
 
             if self.verbose:
                 print(Fore.MAGENTA)
@@ -183,77 +183,77 @@ class Tracker(object):
 
             if idx == 0 or self.gt_camera:
                 c2w = gt_c2w
-                if not self.no_vis_on_first_frame:
-                    # self.visualizer.vis(
-                    #     idx, 0, gt_depth, gt_color, c2w, self.c, self.decoders)
-                    pass
+                # if not self.no_vis_on_first_frame:
+                #     # self.visualizer.vis(
+                #     #     idx, 0, gt_depth, gt_color, c2w, self.c, self.decoders)
+                #     pass
 
             else:
                 gt_camera_tensor = get_tensor_from_camera(gt_c2w)
-                if self.const_speed_assumption and idx-2 >= 0:
-                    pre_c2w = pre_c2w.float()
-                    delta = pre_c2w@self.estimate_c2w_list[idx-2].to(
-                        device).float().inverse()
-                    estimated_new_cam_c2w = delta@pre_c2w
-                else:
-                    estimated_new_cam_c2w = pre_c2w
+            #     if self.const_speed_assumption and idx-2 >= 0:
+            #         pre_c2w = pre_c2w.float()
+            #         delta = pre_c2w@self.estimate_c2w_list[idx-2].to(
+            #             device).float().inverse()
+            #         estimated_new_cam_c2w = delta@pre_c2w
+            #     else:
+            #         estimated_new_cam_c2w = pre_c2w
 
-                camera_tensor = get_tensor_from_camera(
-                    estimated_new_cam_c2w.detach())
-                if self.seperate_LR:
-                    camera_tensor = camera_tensor.to(device).detach()
-                    T = camera_tensor[-3:]
-                    quad = camera_tensor[:4]
-                    cam_para_list_quad = [quad]
-                    quad = Variable(quad, requires_grad=True)
-                    T = Variable(T, requires_grad=True)
-                    camera_tensor = torch.cat([quad, T], 0)
-                    cam_para_list_T = [T]
-                    cam_para_list_quad = [quad]
-                    optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr},
-                                                         {'params': cam_para_list_quad, 'lr': self.cam_lr*0.2}])
-                else:
-                    camera_tensor = Variable(
-                        camera_tensor.to(device), requires_grad=True)
-                    cam_para_list = [camera_tensor]
-                    optimizer_camera = torch.optim.Adam(
-                        cam_para_list, lr=self.cam_lr)
+            #     camera_tensor = get_tensor_from_camera(
+            #         estimated_new_cam_c2w.detach())
+            #     if self.seperate_LR:
+            #         camera_tensor = camera_tensor.to(device).detach()
+            #         T = camera_tensor[-3:]
+            #         quad = camera_tensor[:4]
+            #         cam_para_list_quad = [quad]
+            #         quad = Variable(quad, requires_grad=True)
+            #         T = Variable(T, requires_grad=True)
+            #         camera_tensor = torch.cat([quad, T], 0)
+            #         cam_para_list_T = [T]
+            #         cam_para_list_quad = [quad]
+            #         optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr},
+            #                                              {'params': cam_para_list_quad, 'lr': self.cam_lr*0.2}])
+            #     else:
+            #         camera_tensor = Variable(
+            #             camera_tensor.to(device), requires_grad=True)
+            #         cam_para_list = [camera_tensor]
+            #         optimizer_camera = torch.optim.Adam(
+            #             cam_para_list, lr=self.cam_lr)
 
-                initial_loss_camera_tensor = torch.abs(
-                    gt_camera_tensor.to(device)-camera_tensor).mean().item()
-                candidate_cam_tensor = None
-                current_min_loss = 10000000000.
-                for cam_iter in range(self.num_cam_iters):
-                    if self.seperate_LR:
-                        camera_tensor = torch.cat([quad, T], 0).to(self.device)
+            #     initial_loss_camera_tensor = torch.abs(
+            #         gt_camera_tensor.to(device)-camera_tensor).mean().item()
+            #     candidate_cam_tensor = None
+            #     current_min_loss = 10000000000.
+            #     for cam_iter in range(self.num_cam_iters):
+            #         if self.seperate_LR:
+            #             camera_tensor = torch.cat([quad, T], 0).to(self.device)
 
-                    # self.visualizer.vis(
-                    #     idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.decoders)
+            #         # self.visualizer.vis(
+            #         #     idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.decoders)
 
-                    loss = self.optimize_cam_in_batch(
-                        camera_tensor, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
+            #         loss = self.optimize_cam_in_batch(
+            #             camera_tensor, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
 
-                    if cam_iter == 0:
-                        initial_loss = loss
+            #         if cam_iter == 0:
+            #             initial_loss = loss
 
-                    loss_camera_tensor = torch.abs(
-                        gt_camera_tensor.to(device)-camera_tensor).mean().item()
-                    if self.verbose:
-                        if cam_iter == self.num_cam_iters-1:
-                            print(
-                                f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
-                                f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
-                    if loss < current_min_loss:
-                        current_min_loss = loss
-                        candidate_cam_tensor = camera_tensor.clone().detach()
-                bottom = torch.from_numpy(np.array([0, 0, 0, 1.]).reshape(
-                    [1, 4])).type(torch.float32).to(self.device)
-                c2w = get_camera_from_tensor(
-                    candidate_cam_tensor.clone().detach())
-                c2w = torch.cat([c2w, bottom], dim=0)
-            self.estimate_c2w_list[idx] = c2w.clone().cpu()
-            self.gt_c2w_list[idx] = gt_c2w.clone().cpu()
-            pre_c2w = c2w.clone()
+            #         loss_camera_tensor = torch.abs(
+            #             gt_camera_tensor.to(device)-camera_tensor).mean().item()
+            #         if self.verbose:
+            #             if cam_iter == self.num_cam_iters-1:
+            #                 print(
+            #                     f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
+            #                     f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
+            #         if loss < current_min_loss:
+            #             current_min_loss = loss
+            #             candidate_cam_tensor = camera_tensor.clone().detach()
+            #     bottom = torch.from_numpy(np.array([0, 0, 0, 1.]).reshape(
+            #         [1, 4])).type(torch.float32).to(self.device)
+            #     c2w = get_camera_from_tensor(
+            #         candidate_cam_tensor.clone().detach())
+            #     c2w = torch.cat([c2w, bottom], dim=0)
+            # self.estimate_c2w_list[idx] = c2w.clone().cpu()
+            # self.gt_c2w_list[idx] = gt_c2w.clone().cpu()
+            # pre_c2w = c2w.clone()
             self.idx[0] = idx
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()
