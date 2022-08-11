@@ -13,10 +13,6 @@
           <option name="fileUrl" value="file://$PROJECT_DIR$/configs/ScanNet/scannet.yaml" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="3161" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/NICE_SLAM.py" />
-        </OpenedFileInfo>
-        <OpenedFileInfo>
           <option name="caretOffset" value="0" />
           <option name="fileUrl" value="file://$PROJECT_DIR$/configs/nice_slam.yaml" />
         </OpenedFileInfo>
@@ -25,8 +21,8 @@
           <option name="fileUrl" value="file://$PROJECT_DIR$/src/utils/candidate_renderer.py" />
         </OpenedFileInfo>
         <OpenedFileInfo>
-          <option name="caretOffset" value="740" />
-          <option name="fileUrl" value="file://$PROJECT_DIR$/src/utils/metrics.py" />
+          <option name="caretOffset" value="3161" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/src/NICE_SLAM.py" />
         </OpenedFileInfo>
       </list>
     </option>
