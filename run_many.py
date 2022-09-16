@@ -8,7 +8,7 @@ for dir in dirs:
   if not os.path.isdir(os.path.join(image_dir,dir)):
     dirs.remove(dir)
 
-for dir in sorted(dirs)[108:]:
+for dir in sorted(dirs)[-1:]:
   print(dir)
   config = os.path.join("configs/ScanNet",f"{dir}.yaml")
   

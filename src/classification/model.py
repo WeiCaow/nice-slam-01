@@ -3,12 +3,28 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from datasets import MyDataset
 from torch.utils.data import DataLoader, random_split
+from torchsampler import ImbalancedDatasetSampler
 from torchvision import models  
 import numpy as np
 import torch.nn.functional as F
 from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import classification_report
 import torchmetrics
+from vit_pytorch import ViT
+
+def make_weights_for_balanced_classes(images, nclasses):                        
+        count = [0] * nclasses                                                      
+        for item in images:                                                         
+            count[item[1]] += 1                                                     
+        weight_per_class = [0.] * nclasses                                      
+        N = float(sum(count))                                                   
+        for i in range(nclasses):                                                   
+            weight_per_class[i] = N/float(count[i])                                 
+        weight = [0] * len(images)                                              
+        for idx, val in enumerate(images):                                          
+            weight[idx] = weight_per_class[val[1]]                                  
+        return torch.DoubleTensor(weight)  
+
 
 class resnet(pl.LightningModule):
 
@@ -16,35 +32,57 @@ class resnet(pl.LightningModule):
       super().__init__()
 
       self.save_hyperparameters(hparams)
+      if self.hparams["model"] == "resnet":
+        self.model = models.resnet18()
+        self.model.conv1= nn.Conv2d(4, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.model.fc = nn.Sequential(
+          nn.Linear(512, 32),
+          nn.ReLU(),
+          nn.Dropout(p=0.2),
+          # nn.Linear(128, 32),
+          # nn.ReLU(),
+          # nn.Dropout(p=0.2),
+          nn.Linear(32, self.hparams["num_classes"])
+        )
+      elif self.hparams["model"] == "ViT":
+        self.model = ViT(
+            image_size = (460, 620),
+            patch_size = 20,
+            num_classes = 4,
+            dim = 1024,
+            depth = 6,
+            heads = 16,
+            mlp_dim = 2048,
+            dropout = 0.1,
+            emb_dropout = 0.1
+        )
 
-      self.model  = models.resnet18(pretrained=True)
-      self.model.conv1= nn.Conv2d(4, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-      self.model.fc = nn.Sequential(
-        nn.Linear(512, 128),
-        nn.ReLU(),
-        nn.Dropout(p=0.2),
-        nn.Linear(128, 32),
-        nn.ReLU(),
-        nn.Dropout(p=0.2),
-        nn.Linear(32, self.hparams["num_classes"])
-      )
 
-      dataset = MyDataset(self.hparams["data_dir"])
-      train_size = int(len(dataset) * 0.6)
-      val_size = int(len(dataset) * 0.2)
-      test_size = len(dataset) - train_size - val_size
-      self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [train_size, val_size, test_size],generator=torch.Generator().manual_seed(0))
-      self.accuracy = torchmetrics.Accuracy()
+      self.train_dataset = MyDataset(self.hparams["data_dir"]+"nbv_data_train.txt")
+      self.val_dataset = MyDataset(self.hparams["data_dir"]+"nbv_data_val.txt")
+      self.test_dataset = MyDataset(self.hparams["data_dir"]+"nbv_data_test.txt")
+
+      # self.balanced_weights = dataset.balanced_weights()
+      # self.sampler = torch.utils.data.sampler.WeightedRandomSampler(self.balanced_weights, len(self.balanced_weights))
+
+      # self.balanced_weights = make_weights_for_balanced_classes(self.train_dataset, 4)
+      # self.sampler = torch.utils.data.sampler.WeightedRandomSampler(self.balanced_weights, len(self.balanced_weights))   
+      # Initialize the Weight Transforms
+      # weights = models.ResNet18_Weights.DEFAULT
+      # self.preprocess = weights.transforms()
+
+      
 
     def forward(self, x):
 
-      x = self.model(x)
-      return x
+        x = self.model(x)
+        return x
 
     def training_step(self, batch, batch_idx):
         images, targets = batch
 
         # Perform a forward pass on the network with inputs
+        # images = self.preprocess(images)
         out = self.forward(images)
 
         # calculate the loss with the network predictions and ground truth targets
@@ -74,6 +112,8 @@ class resnet(pl.LightningModule):
         images, targets = batch
 
         # Perform a forward pass on the network with inputs
+        # images = self.preprocess(images)
+
         out = self.forward(images)
 
         # calculate the loss with the network predictions and ground truth targets
@@ -103,16 +143,15 @@ class resnet(pl.LightningModule):
         self.log('val_acc', avg_acc)
 
     def configure_optimizers(self):
-
         optim = torch.optim.Adam(self.model.parameters(), self.hparams["learning_rate"])
-
-        return optim
-
+        return optim  
+    
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.hparams["batch_size"],shuffle = True,num_workers=4,drop_last=True)
+        return DataLoader(self.train_dataset, batch_size=self.hparams["batch_size"], num_workers=4, sampler=ImbalancedDatasetSampler(self.train_dataset), drop_last=True)
+        # sampler=ImbalancedDatasetSampler(self.train_dataset),
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.hparams["batch_size"],shuffle = False,num_workers=4,drop_last=True)
+        return DataLoader(self.val_dataset, batch_size=self.hparams["batch_size"], shuffle=False, num_workers=4, drop_last=True)
     
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.hparams["batch_size"])
@@ -129,6 +168,8 @@ class resnet(pl.LightningModule):
         for batch in loader:
             X, y = batch
             X = X.to(self.device)
+            # X = self.preprocess(X)
+            
             score = self.forward(X)
             scores.append(score.detach().cpu().numpy())
             labels.append(y.detach().cpu().numpy())

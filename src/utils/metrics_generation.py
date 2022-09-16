@@ -12,11 +12,11 @@ image_dir = "Datasets/scannet/scans"
 
 def metrics_generation(image_dir):
   dirs = sorted(os.listdir(image_dir))
-  for dir in dirs:
-    if not os.path.isdir(os.path.join(image_dir,dir)):
-      dirs.remove(dir)
+  # for dir in dirs:
+  #   if os.path.isfile(os.path.join(image_dir,dir)):
+  #     dirs.remove(dir)
   
-  for dir in dirs[:6]:
+  for dir in dirs[4:]:
     render_dir = os.path.join(image_dir, dir,"render")
     frames = sorted(os.listdir(render_dir))
     for frame in frames:
