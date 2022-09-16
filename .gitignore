@@ -142,7 +142,8 @@ output/scannet/scans/scene0000_00/metrics
 output/scannet/scans/scene0000_00/metrics0
 
 # data
-Datasets
+Datasets/
 
 # logs
-logs
+logs/
+MNIST/
