@@ -3,6 +3,8 @@ import time
 
 import cv2
 import numpy as np
+import open3d as o3d
+import glob
 import torch
 from colorama import Fore, Style
 from torch.autograd import Variable
@@ -13,6 +15,7 @@ from src.common import (get_camera_from_tensor, get_samples,
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
 from src.utils.Metrics import Metrics
+from src.utils.candidate_renderer import candidate_generate_np, NRSS
 
 
 class Mapper(object):
@@ -25,8 +28,12 @@ class Mapper(object):
                  ):
 
         self.cfg = cfg
+        self.NBV = cfg['NBV']
         self.args = args
         self.coarse_mapper = coarse_mapper
+
+        # NBV Candidate
+        self.candiadate = slam.candidate
 
         self.idx = slam.idx
         self.nice = slam.nice
@@ -52,6 +59,7 @@ class Mapper(object):
         self.device = cfg['mapping']['device']
         self.fix_fine = cfg['mapping']['fix_fine']
         self.eval_rec = cfg['meshing']['eval_rec']
+        self.move = cfg["candidate"]["move"] # added
         self.BA = False  # Even if BA is enabled, it starts only when there are at least 4 keyframes
         self.BA_cam_lr = cfg['mapping']['BA_cam_lr']
         self.mesh_freq = cfg['mapping']['mesh_freq']
@@ -195,7 +203,7 @@ class Mapper(object):
         gt_depth = gt_depth.repeat(1, N_samples)
         t_vals = torch.linspace(0., 1., steps=N_samples).to(device)
         near = gt_depth*0.8
-        far = gt_depth+0.5
+        far = gt_depth+0.5 #
         z_vals = near * (1.-t_vals) + far * (t_vals)
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
             z_vals[..., :, None]  # [N_rays, N_samples, 3]
@@ -499,124 +507,338 @@ class Mapper(object):
         return None
 
     def run(self):
-        cfg = self.cfg
-        idx, gt_color, gt_depth, gt_c2w = self.frame_reader[0]
 
-        self.estimate_c2w_list[0] = gt_c2w.cpu()
-        init = True
-        prev_idx = -1
-        while (1):
-            while True:
-                idx = self.idx[0].clone()
-                if idx == self.n_img-1:
-                    break
-                if self.sync_method == 'strict':
-                    if idx % self.every_frame == 0 and idx != prev_idx:
+        if self.NBV == False:
+            cfg = self.cfg
+            idx, gt_color, gt_depth, gt_c2w = self.frame_reader[0]
+
+            self.estimate_c2w_list[0] = gt_c2w.cpu()
+            init = True
+            prev_idx = -1
+            while (1):
+                while True:
+                    idx = self.idx[0].clone()
+                    if idx == self.n_img-1:
                         break
-                elif self.sync_method == 'loose':
-                    if idx == 0 or idx >= prev_idx+self.every_frame//2:
+                    if self.sync_method == 'strict':
+                        if idx % self.every_frame == 0 and idx != prev_idx:
+                            break
+                    elif self.sync_method == 'loose':
+                        if idx == 0 or idx >= prev_idx+self.every_frame//2:
+                            break
+                    elif self.sync_method == 'free':
                         break
-                elif self.sync_method == 'free':
-                    break
-                time.sleep(0.1)
-            prev_idx = idx
+                    time.sleep(0.1)
+                prev_idx = idx
 
-            if self.verbose:
-                print(Fore.GREEN)
-                prefix = 'Coarse ' if self.coarse_mapper else ''
-                print(prefix+"Mapping Frame ", idx.item())
-                print(Style.RESET_ALL)
+                if self.verbose:
+                    print(Fore.GREEN)
+                    prefix = 'Coarse ' if self.coarse_mapper else ''
+                    print(prefix+"Mapping Frame ", idx.item())
+                    print(Style.RESET_ALL)
 
-            _, gt_color, gt_depth, gt_c2w = self.frame_reader[idx]
+                _, gt_color, gt_depth, gt_c2w = self.frame_reader[idx]
 
-            if not init:
-                lr_factor = cfg['mapping']['lr_factor']
-                num_joint_iters = cfg['mapping']['iters']
+                if not init:
+                    lr_factor = cfg['mapping']['lr_factor']
+                    num_joint_iters = cfg['mapping']['iters']
 
-                # here provides a color refinement postprocess
-                if idx == self.n_img-1 and self.color_refine and not self.coarse_mapper:
-                    outer_joint_iters = 5
-                    self.mapping_window_size *= 2
-                    self.middle_iter_ratio = 0.0
-                    self.fine_iter_ratio = 0.0
-                    num_joint_iters *= 5
-                    self.fix_color = True
-                    self.frustum_feature_selection = False
-                else:
-                    if self.nice:
-                        outer_joint_iters = 1
+                    # here provides a color refinement postprocess
+                    if idx == self.n_img-1 and self.color_refine and not self.coarse_mapper:
+                        outer_joint_iters = 5
+                        self.mapping_window_size *= 2
+                        self.middle_iter_ratio = 0.0
+                        self.fine_iter_ratio = 0.0
+                        num_joint_iters *= 5
+                        self.fix_color = True
+                        self.frustum_feature_selection = False
                     else:
-                        outer_joint_iters = 3
+                        if self.nice:
+                            outer_joint_iters = 1
+                        else:
+                            outer_joint_iters = 3
 
-            else:
-                outer_joint_iters = 1
-                lr_factor = cfg['mapping']['lr_first_factor']
-                num_joint_iters = cfg['mapping']['iters_first']
+                else:
+                    outer_joint_iters = 1
+                    lr_factor = cfg['mapping']['lr_first_factor']
+                    num_joint_iters = cfg['mapping']['iters_first']
 
 
 
-            cur_c2w = gt_c2w
-            # cur_c2w = self.estimate_c2w_list[idx].to(self.device)
-            num_joint_iters = num_joint_iters//outer_joint_iters
-            for outer_joint_iter in range(outer_joint_iters):
+                cur_c2w = gt_c2w
+                # cur_c2w = self.estimate_c2w_list[idx].to(self.device)
+                num_joint_iters = num_joint_iters//outer_joint_iters
+                for outer_joint_iter in range(outer_joint_iters):
 
-                # self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA'] and (
-                #     not self.coarse_mapper)
+                    # self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA'] and (
+                    #     not self.coarse_mapper)
 
-                self.BA = False
+                    self.BA = False
 
-                _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
-                                      self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
+                    _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
+                                        self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
 
-                # add new frame to keyframe set
-                if outer_joint_iter == outer_joint_iters-1:
-                    if (idx % self.keyframe_every == 0 or (idx == self.n_img-2)) \
-                            and (idx not in self.keyframe_list):
-                        self.keyframe_list.append(idx) # 储存哪几个frame是keyframe
-                        self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
-                        ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
+                    # add new frame to keyframe set
+                    if outer_joint_iter == outer_joint_iters-1:
+                        if (idx % self.keyframe_every == 0 or (idx == self.n_img-2)) \
+                                and (idx not in self.keyframe_list):
+                            self.keyframe_list.append(idx) # 储存哪几个frame是keyframe
+                            self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
+                            ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
 
-            if self.low_gpu_mem:
-                torch.cuda.empty_cache()
+                                        # test 
 
-            init = False
-            # mapping of first frame is done, can begin tracking
-            self.mapping_first_frame[0] = 1
+                    # mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
+                    # self.mesher.get_bigFoV(os.path.join(self.output, 'NBV_render'),mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                    #                     idx,  self.device, show_forecast=self.mesh_coarse_level,
+                    #                     clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
 
-            if not self.coarse_mapper:
-                if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) \
-                        or idx == self.n_img-1:
-                    self.logger.log(idx, self.keyframe_dict, self.keyframe_list,
-                                    selected_keyframes=self.selected_keyframes
-                                    if self.save_selected_keyframes_info else None)
 
-                self.mapping_idx[0] = idx
-                self.mapping_cnt[0] += 1
+                if self.low_gpu_mem:
+                    torch.cuda.empty_cache()
 
-                if (idx % self.mesh_freq == 0) and (not (idx == 0 and self.no_mesh_on_first_frame)):
-                    mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
-                    # self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
-                    #                      idx,  self.device, show_forecast=self.mesh_coarse_level,
-                    #                      clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
-                    # self.visualizer.vis(
-                    #     idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.decoders)
-                    self.mesher.get_bigFoV(os.path.join(cfg["data"]["input_folder"], 'render'),mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
-                                        idx,  self.device, show_forecast=self.mesh_coarse_level,
-                                        clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+                init = False
+                # mapping of first frame is done, can begin tracking
+                self.mapping_first_frame[0] = 1
+
+
+
+                if not self.coarse_mapper: # not coarse_mapper enter this
+                    if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) \
+                            or idx == self.n_img-1:
+                        self.logger.log(idx, self.keyframe_dict, self.keyframe_list,
+                                        selected_keyframes=self.selected_keyframes
+                                        if self.save_selected_keyframes_info else None)
+
+                    self.mapping_idx[0] = idx
+                    self.mapping_cnt[0] += 1
+
+                    if (idx % self.mesh_freq == 0) and (not (idx == 0 and self.no_mesh_on_first_frame)):
+                        mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
+                        # self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                        #                     idx,  self.device, show_forecast=self.mesh_coarse_level,
+                        #                     clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+
+                        self.mesher.get_bigFoV(os.path.join(cfg["data"]["input_folder"], 'render'),mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                                            idx,  self.device, show_forecast=self.mesh_coarse_level,
+                                            clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+
+                    if idx == self.n_img-1:
+                        mesh_out_file = f'{self.output}/mesh/final_mesh.ply'
+                        self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                                            idx,  self.device, show_forecast=self.mesh_coarse_level,
+                                            clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+                        os.system(
+                            f"cp {mesh_out_file} {self.output}/mesh/{idx:05d}_mesh.ply")
+                        if self.eval_rec:
+                            mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
+                            self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict,
+                                                self.estimate_c2w_list, idx, self.device, show_forecast=False,
+                                                clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
+                        break
 
                 if idx == self.n_img-1:
-                    mesh_out_file = f'{self.output}/mesh/final_mesh.ply'
-                    self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
-                                         idx,  self.device, show_forecast=self.mesh_coarse_level,
-                                         clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
-                    os.system(
-                        f"cp {mesh_out_file} {self.output}/mesh/{idx:05d}_mesh.ply")
-                    if self.eval_rec:
-                        mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
-                        self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict,
-                                             self.estimate_c2w_list, idx, self.device, show_forecast=False,
-                                             clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
                     break
+        else:
+            idx = 0
+            cfg = self.cfg
+            H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
+            mesh = o3d.io.read_triangle_mesh(glob.glob(os.path.join(self.cfg['data']['input_folder'],"*.ply"))[0])
+            camera_intrinsics = o3d.camera.PinholeCameraIntrinsic(W, H, fx, fy, cx, cy)
+            render = o3d.visualization.rendering.OffscreenRenderer(
+                        W, H, headless=True)
+            mtl = o3d.visualization.rendering.MaterialRecord()
+            mtl.base_color = [1, 1, 1, 1]
+            mtl.shader = "defaultUnlit"
+            # render.scene.set_lighting(o3d.visualization.rendering.Open3DScene.LightingProfile.NO_SHADOWS, np.array([0, 0, -1]))
+            render.scene.set_background([0, 0, 0, 0])
+            render.scene.add_geometry("model", mesh, mtl)
+            
+            
+            self.c2w = np.loadtxt(os.path.join(self.cfg['data']['input_folder'],"pose","0.txt"))
 
-            if idx == self.n_img-1:
-                break
+            c2w = self.c2w
+            # c2w[:3, 1] *= -1.0
+            # c2w[:3, 2] *= -1.0
+            w2c = np.linalg.inv(c2w)
+
+            render.setup_camera(camera_intrinsics,w2c)
+            dimg = render.render_to_depth_image(True)
+            cimg = render.render_to_image()
+            cimg = np.asarray(cimg)
+            cimg = cimg/255.0
+
+            dimg = np.asarray(dimg)
+            dimg[np.isinf(dimg)]=0
+
+            gt_color = torch.tensor(cimg).to(self.device)
+            gt_depth = torch.tensor(dimg).to(self.device)
+            gt_c2w = torch.tensor(c2w).to(self.device)
+            gt_c2w[:3, 1] *= -1.0
+            gt_c2w[:3, 2] *= -1.0
+
+            # 这里的相机参数有问题
+            init = True
+            prev_idx = -1
+            while (1):
+                while True:
+                    idx = self.idx[0].clone()
+                    if idx == self.n_img-1:
+                        break
+                    if self.sync_method == 'strict':
+                        # idx % self.every_frame == 0 and
+                        if idx != prev_idx:
+                            break
+                    time.sleep(0.1)
+                prev_idx = idx
+
+                if self.verbose:
+                    print(Fore.GREEN)
+                    prefix = 'Coarse ' if self.coarse_mapper else ''
+                    print(prefix+"Mapping Frame ", idx.item())
+                    print(Style.RESET_ALL)
+
+                if idx != 0:
+                    pre_c2w = self.keyframe_dict[-1]['gt_c2w'].numpy()
+                    list = candidate_generate_np(pre_c2w, move = self.move)
+                    while True:
+                        if len(self.candiadate)!=0:
+                             break
+                        time.sleep(0.1)
+                    # current_c2w = list[self.candiadate[-1]]
+                    current_c2w = list[-1]
+
+                    current_c2w[:3, 1] *= -1.0
+                    current_c2w[:3, 2] *= -1.0
+                    w2c = np.linalg.inv(current_c2w)
+
+                    render.setup_camera(camera_intrinsics,w2c)
+                    dimg = render.render_to_depth_image(True)
+                    cimg = render.render_to_image()
+                    cimg = np.asarray(cimg)
+                    cimg = cimg/255.0
+
+                    dimg = np.asarray(dimg)
+                    dimg[np.isinf(dimg)]=0
+
+                    gt_color = torch.tensor(cimg).to(self.device)
+                    gt_depth = torch.tensor(dimg).to(self.device)
+                    gt_c2w = torch.tensor(current_c2w).to(self.device)
+                    gt_c2w[:3, 1] *= -1.0
+                    gt_c2w[:3, 2] *= -1.0
+
+
+                if not init:
+                    lr_factor = cfg['mapping']['lr_factor']
+                    num_joint_iters = cfg['mapping']['iters']
+
+                    # here provides a color refinement postprocess
+                    if idx == self.n_img-1 and self.color_refine and not self.coarse_mapper:
+                        outer_joint_iters = 5
+                        self.mapping_window_size *= 2
+                        self.middle_iter_ratio = 0.0
+                        self.fine_iter_ratio = 0.0
+                        num_joint_iters *= 5
+                        self.fix_color = True
+                        self.frustum_feature_selection = False
+                    else:
+                        if self.nice:
+                            outer_joint_iters = 1
+                        else:
+                            outer_joint_iters = 3
+
+                else:
+                    outer_joint_iters = 1
+                    lr_factor = cfg['mapping']['lr_first_factor']
+                    num_joint_iters = cfg['mapping']['iters_first']
+
+                cur_c2w = gt_c2w
+                # cur_c2w = self.estimate_c2w_list[idx].to(self.device)
+                num_joint_iters = num_joint_iters//outer_joint_iters
+                for outer_joint_iter in range(outer_joint_iters):
+
+                    # self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA'] and (
+                    #     not self.coarse_mapper)
+
+                    self.BA = False
+
+                    _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
+                                        self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
+
+                    # add new frame to keyframe set
+
+                    self.keyframe_list.append(idx) # 储存哪几个frame是keyframe
+                    self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
+                    ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
+
+                if self.low_gpu_mem:
+                    torch.cuda.empty_cache()
+                
+                init = False
+                # mapping of first frame is done, can begin tracking
+                self.mapping_first_frame[0] = 1
+
+                if not self.coarse_mapper:
+                    # if not idx == 0:
+                    #     self.logger.log(idx, self.keyframe_dict, self.keyframe_list,
+                    #                     selected_keyframes=self.selected_keyframes
+                    #                     if self.save_selected_keyframes_info else None)
+
+                    self.mapping_idx[0] = idx
+                    self.mapping_cnt[0] += 1
+
+
+                    mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
+                    
+                    candidate_color, candidate_depth, cimg_big, dimg_big = self.mesher.get_NBV(os.path.join(self.output, 'NBV_render'),mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                                            idx,  self.device, show_forecast=self.mesh_coarse_level,
+                                            clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+
+                    
+                    
+                    # self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                    #                     idx,  self.device, show_forecast=self.mesh_coarse_level,
+                    #                     clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+
+                        # self.mesher.get_bigFoV(os.path.join(cfg["data"]["input_folder"], 'render'),mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                        #                     idx,  self.device, show_forecast=self.mesh_coarse_level,
+                        #                     clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+
+                    # if idx == self.n_img-1:
+                    #     mesh_out_file = f'{self.output}/mesh/final_mesh.ply'
+                    #     self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                    #                         idx,  self.device, show_forecast=self.mesh_coarse_level,
+                    #                         clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+                    #     os.system(
+                    #         f"cp {mesh_out_file} {self.output}/mesh/{idx:05d}_mesh.ply")
+                    #     if self.eval_rec:
+                    #         mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
+                    #         self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict,
+                    #                             self.estimate_c2w_list, idx, self.device, show_forecast=False,
+                    #                             clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
+                    #     break
+                        
+
+# 然后渲染出四个Candidate，根据candidate选择NBV
+# 这个地方应该修改一下Mesher，然后用meshe渲染，最后返回一个NBV
+
+                    scores = []
+
+                    for i,img in enumerate(candidate_depth):
+
+                        scores.append(NRSS(img,depth=True))
+
+                    self.candiadate.append(np.argmin(scores))
+
+                    print(idx," ",np.argmin(scores))
+                    
+# 接下来任务：把这个NBV传到下一帧，然后循环起来，就结束了，啊，好累，估计还要三四天的工作量
+                    
+                    
+
+
+            
+# 再接下来的任务
+    # 比较一下Coarse和普通的区别
+    # 确定一下他朝着正确的地方走
+    # 输出图像

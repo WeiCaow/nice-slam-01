@@ -80,6 +80,9 @@ def get_rays_from_uv(i, j, c2w, H, W, fx, fy, cx, cy, device):
     if isinstance(c2w, np.ndarray):
         c2w = torch.from_numpy(c2w).to(device)
 
+    # modified
+    c2w = c2w.to(device)
+
     dirs = torch.stack(
         [(i-cx)/fx, -(j-cy)/fy, -torch.ones_like(i)], -1).to(device)
     dirs = dirs.reshape(-1, 1, 3)

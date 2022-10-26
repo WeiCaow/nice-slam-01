@@ -475,10 +475,11 @@ def headless_pcd_render(mesh, camera_extrinsics):
         color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8)
 
     for i in range(len(camera_extrinsics)):
-
+        print(f"{i} frame of total {len(camera_extrinsics)} frames")
         camera_extrinsics_copy = np.copy(camera_extrinsics[i])
-        camera_extrinsics_copy[:3, 1] *= -1
-        camera_extrinsics_copy[:3, 2] *= -1
+        # 如果直接从dataset里提取pose需要-1，c2w不需要
+        # camera_extrinsics_copy[:3, 1] *= -1
+        # camera_extrinsics_copy[:3, 2] *= -1
         camera_extrinsics_copy = np.linalg.inv(camera_extrinsics_copy)
 
         render = o3d.visualization.rendering.OffscreenRenderer(

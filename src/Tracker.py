@@ -8,6 +8,8 @@ from colorama import Fore, Style
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import open3d as o3d
+import glob
 
 from src.common import (get_camera_from_tensor, get_samples,
                         get_tensor_from_camera)
@@ -25,6 +27,13 @@ class Tracker(object):
         self.coarse = cfg['coarse']
         self.occupancy = cfg['occupancy']
         self.sync_method = cfg['sync_method']
+
+        self.NBV = cfg['NBV']
+        self.nbv_step = cfg['NBV_Step']
+        self.nbv_c2w_list = slam.nbv_c2w_list
+        self.color = None
+        self.depth = None
+        self.c2w = None
 
         self.idx = slam.idx
         self.nice = slam.nice
@@ -149,111 +158,173 @@ class Tracker(object):
         else:
             pbar = tqdm(self.frame_loader)
 
-        for idx, gt_color, gt_depth, gt_c2w in pbar:
-            if not self.verbose:
-                pbar.set_description(f"Tracking Frame {idx[0]}")
 
-            idx = idx[0]
-            gt_depth = gt_depth[0]
-            gt_color = gt_color[0]
-            gt_c2w = gt_c2w[0]
+        if self.NBV == False:
+            for idx, gt_color, gt_depth, gt_c2w in pbar:
+                if not self.verbose:
+                    pbar.set_description(f"Tracking Frame {idx[0]}")
 
-            if self.sync_method == 'strict':
-                # strictly mapping and then tracking
-                # initiate mapping every self.every_frame frames
-                if idx > 0 and (idx % self.every_frame == 1 or self.every_frame == 1):
-                    while self.mapping_idx[0] != idx-1:
+                idx = idx[0]
+                gt_depth = gt_depth[0]
+                gt_color = gt_color[0]
+                gt_c2w = gt_c2w[0]
+
+                if self.sync_method == 'strict':
+                    # strictly mapping and then tracking
+                    # initiate mapping every self.every_frame frames
+                    if idx > 0 and (idx % self.every_frame == 1 or self.every_frame == 1):
+                        while self.mapping_idx[0] != idx-1:
+                            time.sleep(0.1)
+                        # pre_c2w = self.estimate_c2w_list[idx-1].to(device)
+                elif self.sync_method == 'loose':
+                    # mapping idx can be later than tracking idx is within the bound of
+                    # [-self.every_frame-self.every_frame//2, -self.every_frame+self.every_frame//2]
+                    while self.mapping_idx[0] < idx-self.every_frame-self.every_frame//2:
                         time.sleep(0.1)
-                    # pre_c2w = self.estimate_c2w_list[idx-1].to(device)
-            elif self.sync_method == 'loose':
-                # mapping idx can be later than tracking idx is within the bound of
-                # [-self.every_frame-self.every_frame//2, -self.every_frame+self.every_frame//2]
-                while self.mapping_idx[0] < idx-self.every_frame-self.every_frame//2:
-                    time.sleep(0.1)
-            elif self.sync_method == 'free':
-                # pure parallel, if mesh/vis happens may cause inbalance
-                pass
+                elif self.sync_method == 'free':
+                    # pure parallel, if mesh/vis happens may cause inbalance
+                    pass
 
-            # self.update_para_from_mapping()
+                # self.update_para_from_mapping()
 
-            if self.verbose:
-                print(Fore.MAGENTA)
-                print("Tracking Frame ",  idx.item())
-                print(Style.RESET_ALL)
+                if self.verbose:
+                    print(Fore.MAGENTA)
+                    print("Tracking Frame ",  idx.item())
+                    print(Style.RESET_ALL)
 
-            if idx == 0 or self.gt_camera:
-                c2w = gt_c2w
-                # if not self.no_vis_on_first_frame:
-                #     # self.visualizer.vis(
-                #     #     idx, 0, gt_depth, gt_color, c2w, self.c, self.decoders)
-                #     pass
+                if idx == 0 or self.gt_camera:
+                    c2w = gt_c2w
+                    # if not self.no_vis_on_first_frame:
+                    #     # self.visualizer.vis(
+                    #     #     idx, 0, gt_depth, gt_color, c2w, self.c, self.decoders)
+                    #     pass
 
-            else:
-                gt_camera_tensor = get_tensor_from_camera(gt_c2w)
-            #     if self.const_speed_assumption and idx-2 >= 0:
-            #         pre_c2w = pre_c2w.float()
-            #         delta = pre_c2w@self.estimate_c2w_list[idx-2].to(
-            #             device).float().inverse()
-            #         estimated_new_cam_c2w = delta@pre_c2w
-            #     else:
-            #         estimated_new_cam_c2w = pre_c2w
+                else:
+                    gt_camera_tensor = get_tensor_from_camera(gt_c2w)
+                #     if self.const_speed_assumption and idx-2 >= 0:
+                #         pre_c2w = pre_c2w.float()
+                #         delta = pre_c2w@self.estimate_c2w_list[idx-2].to(
+                #             device).float().inverse()
+                #         estimated_new_cam_c2w = delta@pre_c2w
+                #     else:
+                #         estimated_new_cam_c2w = pre_c2w
 
-            #     camera_tensor = get_tensor_from_camera(
-            #         estimated_new_cam_c2w.detach())
-            #     if self.seperate_LR:
-            #         camera_tensor = camera_tensor.to(device).detach()
-            #         T = camera_tensor[-3:]
-            #         quad = camera_tensor[:4]
-            #         cam_para_list_quad = [quad]
-            #         quad = Variable(quad, requires_grad=True)
-            #         T = Variable(T, requires_grad=True)
-            #         camera_tensor = torch.cat([quad, T], 0)
-            #         cam_para_list_T = [T]
-            #         cam_para_list_quad = [quad]
-            #         optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr},
-            #                                              {'params': cam_para_list_quad, 'lr': self.cam_lr*0.2}])
-            #     else:
-            #         camera_tensor = Variable(
-            #             camera_tensor.to(device), requires_grad=True)
-            #         cam_para_list = [camera_tensor]
-            #         optimizer_camera = torch.optim.Adam(
-            #             cam_para_list, lr=self.cam_lr)
+                #     camera_tensor = get_tensor_from_camera(
+                #         estimated_new_cam_c2w.detach())
+                #     if self.seperate_LR:
+                #         camera_tensor = camera_tensor.to(device).detach()
+                #         T = camera_tensor[-3:]
+                #         quad = camera_tensor[:4]
+                #         cam_para_list_quad = [quad]
+                #         quad = Variable(quad, requires_grad=True)
+                #         T = Variable(T, requires_grad=True)
+                #         camera_tensor = torch.cat([quad, T], 0)
+                #         cam_para_list_T = [T]
+                #         cam_para_list_quad = [quad]
+                #         optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr},
+                #                                              {'params': cam_para_list_quad, 'lr': self.cam_lr*0.2}])
+                #     else:
+                #         camera_tensor = Variable(
+                #             camera_tensor.to(device), requires_grad=True)
+                #         cam_para_list = [camera_tensor]
+                #         optimizer_camera = torch.optim.Adam(
+                #             cam_para_list, lr=self.cam_lr)
 
-            #     initial_loss_camera_tensor = torch.abs(
-            #         gt_camera_tensor.to(device)-camera_tensor).mean().item()
-            #     candidate_cam_tensor = None
-            #     current_min_loss = 10000000000.
-            #     for cam_iter in range(self.num_cam_iters):
-            #         if self.seperate_LR:
-            #             camera_tensor = torch.cat([quad, T], 0).to(self.device)
+                #     initial_loss_camera_tensor = torch.abs(
+                #         gt_camera_tensor.to(device)-camera_tensor).mean().item()
+                #     candidate_cam_tensor = None
+                #     current_min_loss = 10000000000.
+                #     for cam_iter in range(self.num_cam_iters):
+                #         if self.seperate_LR:
+                #             camera_tensor = torch.cat([quad, T], 0).to(self.device)
 
-            #         # self.visualizer.vis(
-            #         #     idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.decoders)
+                #         # self.visualizer.vis(
+                #         #     idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.decoders)
 
-            #         loss = self.optimize_cam_in_batch(
-            #             camera_tensor, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
+                #         loss = self.optimize_cam_in_batch(
+                #             camera_tensor, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
 
-            #         if cam_iter == 0:
-            #             initial_loss = loss
+                #         if cam_iter == 0:
+                #             initial_loss = loss
 
-            #         loss_camera_tensor = torch.abs(
-            #             gt_camera_tensor.to(device)-camera_tensor).mean().item()
-            #         if self.verbose:
-            #             if cam_iter == self.num_cam_iters-1:
-            #                 print(
-            #                     f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
-            #                     f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
-            #         if loss < current_min_loss:
-            #             current_min_loss = loss
-            #             candidate_cam_tensor = camera_tensor.clone().detach()
-            #     bottom = torch.from_numpy(np.array([0, 0, 0, 1.]).reshape(
-            #         [1, 4])).type(torch.float32).to(self.device)
-            #     c2w = get_camera_from_tensor(
-            #         candidate_cam_tensor.clone().detach())
-            #     c2w = torch.cat([c2w, bottom], dim=0)
-            # self.estimate_c2w_list[idx] = c2w.clone().cpu()
-            # self.gt_c2w_list[idx] = gt_c2w.clone().cpu()
-            # pre_c2w = c2w.clone()
-            self.idx[0] = idx
-            if self.low_gpu_mem:
-                torch.cuda.empty_cache()
+                #         loss_camera_tensor = torch.abs(
+                #             gt_camera_tensor.to(device)-camera_tensor).mean().item()
+                #         if self.verbose:
+                #             if cam_iter == self.num_cam_iters-1:
+                #                 print(
+                #                     f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
+                #                     f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
+                #         if loss < current_min_loss:
+                #             current_min_loss = loss
+                #             candidate_cam_tensor = camera_tensor.clone().detach()
+                #     bottom = torch.from_numpy(np.array([0, 0, 0, 1.]).reshape(
+                #         [1, 4])).type(torch.float32).to(self.device)
+                #     c2w = get_camera_from_tensor(
+                #         candidate_cam_tensor.clone().detach())
+                #     c2w = torch.cat([c2w, bottom], dim=0)
+                # self.estimate_c2w_list[idx] = c2w.clone().cpu()
+                # self.gt_c2w_list[idx] = gt_c2w.clone().cpu()
+                # pre_c2w = c2w.clone()
+                self.idx[0] = idx
+                if self.low_gpu_mem:
+                    torch.cuda.empty_cache()
+        else:
+
+            for idx in range(self.nbv_step):
+                H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
+                mesh = o3d.io.read_triangle_mesh(glob.glob(os.path.join(self.cfg['data']['input_folder'],"*.ply"))[0])
+                camera_intrinsics = o3d.camera.PinholeCameraIntrinsic(W, H, fx, fy, cx, cy)
+                render = o3d.visualization.rendering.OffscreenRenderer(
+                            W, H, headless=True)
+                mtl = o3d.visualization.rendering.MaterialRecord()
+                mtl.base_color = [1, 1, 1, 1]
+                mtl.shader = "defaultUnlit"
+                # render.scene.set_lighting(o3d.visualization.rendering.Open3DScene.LightingProfile.NO_SHADOWS, np.array([0, 0, -1]))
+                render.scene.set_background([0, 0, 0, 0])
+                render.scene.add_geometry("model", mesh, mtl)
+
+                if self.sync_method == 'strict':
+                    # strictly mapping and then tracking
+                    # initiate mapping every self.every_frame frames
+                        if idx > 0 :
+                            while self.mapping_idx[0] != idx-1:
+                                time.sleep(0.1)
+                
+                if idx == 0:
+                    self.c2w = np.loadtxt(os.path.join(self.cfg['data']['input_folder'],"pose","0.txt"))
+
+                    c2w = self.c2w
+                    # c2w[:3, 1] *= -1.0
+                    # c2w[:3, 2] *= -1.0
+                    w2c = np.linalg.inv(c2w)
+
+                    render.setup_camera(camera_intrinsics,w2c)
+                    dimg = render.render_to_depth_image(True)
+                    cimg = render.render_to_image()
+                    cimg = np.asarray(cimg)
+
+                    dimg = np.asarray(dimg)
+                    dimg[np.isinf(dimg)]=0
+
+
+
+
+                    
+                            # pre_c2w = self.estimate_c2w_list[idx-1].to(device)
+
+
+
+                else:
+                    pass
+                
+                self.idx[0] = idx
+                if self.low_gpu_mem:
+                    torch.cuda.empty_cache()
+
+                    
+
+
+            
+
+
+

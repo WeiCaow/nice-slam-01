@@ -17,7 +17,7 @@ def compare(nbv_dir,metrics_dir,scans_dir):
   top_1 = []
   top_2 = []
   dirs = sorted(os.listdir(scans_dir))
-  for dir in dirs[4:60]:
+  for dir in dirs[4:]:
     render_dir = os.path.join(scans_dir,dir,"render")
     frames = sorted(os.listdir(render_dir))
     for frame in frames:
@@ -26,7 +26,7 @@ def compare(nbv_dir,metrics_dir,scans_dir):
       metric_order = np.argsort(pd.read_csv(frame_dir, index_col=0).to_numpy(), axis=0)
       nbv_dir = os.path.join(scans_dir,dir,"nbv",f"{frame}.txt")
       nbv = np.loadtxt(nbv_dir)
-      nbv = np.argsort(nbv)
+      nbv = np.argsort(nbv)[::-1]
 
 
       nbv = nbv[:,None].repeat(metric_order.shape[-1], axis=1)

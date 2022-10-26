@@ -1346,7 +1346,6 @@ class Mesher(object):
             plt.imsave(os.path.join(save_dir, f'rgb_big.jpg'), cimg)
 
 
-
     def get_smallFoV(self,
                  image_out_file,
                  mesh_out_file,
@@ -1596,3 +1595,300 @@ class Mesher(object):
             plt.imsave(os.path.join(save_dir, f'depth_big.png'), dimg)
             plt.imsave(os.path.join(save_dir, f'rgb_big.jpg'), cimg)
          
+
+    def get_NBV(self,
+                 image_out_file,
+                 mesh_out_file,
+                 c,
+                 decoders,
+                 keyframe_dict,
+                 estimate_c2w_list,
+                 idx,
+                 device='cuda:0',
+                 show_forecast=False,
+                 color=True,
+                 clean_mesh=True,
+                 get_mask_use_all_frames=False):
+        """
+        Extract mesh from scene representation and save mesh to file.
+
+        Args:
+            mesh_out_file (str): output mesh filename.
+            c (dicts): feature grids.
+            decoders (nn.module): decoders.
+            keyframe_dict (list):  list of keyframe info.
+            estimate_c2w_list (tensor): estimated camera pose.
+            idx (int): current processed camera ID.
+            device (str, optional): device name to compute on. Defaults to 'cuda:0'.
+            show_forecast (bool, optional): show forecast. Defaults to False.
+            color (bool, optional): whether to extract colored mesh. Defaults to True.
+            clean_mesh (bool, optional): whether to clean the output mesh 
+                                        (remove outliers outside the convexhull and small geometry noise). 
+                                        Defaults to True.
+            get_mask_use_all_frames (bool, optional): 
+                whether to use all frames or just keyframes when getting the seen/unseen mask. Defaults to False.
+        """
+        with torch.no_grad():
+
+            grid = self.get_grid_uniform(self.resolution)
+            points = grid['grid_points']
+            points = points.to(device)
+
+            # 根据设置的场景范围返回整个场景根据分辨率得到的网格
+
+            # 基于之前看到的所有帧或者keyframe得到的mask 
+            seen_mask, forecast_mask, unseen_mask = self.point_masks(
+                points, keyframe_dict, estimate_c2w_list, idx, device=device, 
+                get_mask_use_all_frames=get_mask_use_all_frames)
+
+
+
+            # up_mask, down_mask, left_mask, right_mask = self.point_masks_ca(
+            #     points, keyframe_dict, estimate_c2w_list, idx, device=device, 
+            #     get_mask_use_all_frames=get_mask_use_all_frames)
+
+
+            # 根据分辨率把整个scene围城的bbx分割成无数个点，seen points是所有从现在这个pose射出的ray能看到的点的集合， forecast 是我们想要预测的一个范围
+            forecast_points = points[forecast_mask] # 这些点的位置
+            seen_points = points[seen_mask] # points 是所有点的坐标
+
+            z_forecast = []
+            for i, pnts in enumerate(
+                    torch.split(forecast_points,
+                                self.points_batch_size,
+                                dim=0)):
+                z_forecast.append(
+                    # 这些是直接从decoder里出来的点
+                    self.eval_points(pnts, decoders, c, 'coarse',
+                                        device).cpu().numpy()[:, -1]) # 前三个维度是RGB，最后一个维度是occ
+            z_forecast = np.concatenate(z_forecast, axis=0)
+            z_forecast += 0.2
+
+            z_seen = []
+            for i, pnts in enumerate(
+                    torch.split(seen_points, self.points_batch_size,
+                                dim=0)):
+                z_seen.append(
+                    self.eval_points(pnts, decoders, c, 'fine',
+                                        device).cpu().numpy()[:, -1])
+            z_seen = np.concatenate(z_seen, axis=0)
+
+            z = np.zeros(points.shape[0]) # 存入深度信息
+            z[seen_mask] = z_seen
+            z[forecast_mask] = z_forecast
+            z[unseen_mask] = -100
+            # 所有点的深度信息
+ 
+            z = z.astype(np.float32)
+            
+            try:
+                if version.parse(
+                        skimage.__version__) > version.parse('0.15.0'):
+                    # for new version as provided in environment.yaml
+                    # Marching cubes algorithm to find surfaces in 3d volumetric data
+                    verts, faces, normals, values = skimage.measure.marching_cubes(
+                        volume=z.reshape( # x,y,z
+                            grid['xyz'][1].shape[0], grid['xyz'][0].shape[0],
+                            grid['xyz'][2].shape[0]).transpose([1, 0, 2]),
+                        level=self.level_set,
+                        spacing=(grid['xyz'][0][2] - grid['xyz'][0][1],
+                                 grid['xyz'][1][2] - grid['xyz'][1][1],
+                                 grid['xyz'][2][2] - grid['xyz'][2][1]))
+                else:
+                    # for lower version
+                    verts, faces, normals, values = skimage.measure.marching_cubes_lewiner(
+                        volume=z.reshape(
+                            grid['xyz'][1].shape[0], grid['xyz'][0].shape[0],
+                            grid['xyz'][2].shape[0]).transpose([1, 0, 2]),
+                        level=self.level_set,
+                        spacing=(grid['xyz'][0][2] - grid['xyz'][0][1],
+                                 grid['xyz'][1][2] - grid['xyz'][1][1],
+                                 grid['xyz'][2][2] - grid['xyz'][2][1]))
+            except:
+                print(
+                    'marching_cubes error. Possibly no surface extracted from the level set.'
+                )
+                return
+
+            # convert back to world coordinates
+            vertices = verts + np.array(
+                [grid['xyz'][0][0], grid['xyz'][1][0], grid['xyz'][2][0]])
+
+
+            if self.color_mesh_extraction_method == 'direct_point_query':
+                # color is extracted by passing the coordinates of mesh vertices through the network
+                points = torch.from_numpy(vertices) # 来自更新后的mesh的所有顶点
+                z = []
+                for i, pnts in enumerate(
+                        torch.split(points, self.points_batch_size, dim=0)):
+                    z_color = self.eval_points(
+                        pnts.to(device).float(), decoders, c, 'color',
+                        device).cpu()[..., :3]
+                    z.append(z_color)
+                z = torch.cat(z, axis=0)
+                vertex_colors = z.numpy()
+
+            elif self.color_mesh_extraction_method == 'render_ray_along_normal':
+                # for imap*
+                # render out the color of the ray along vertex normal, and assign it to vertex color
+                import open3d as o3d
+                mesh = o3d.geometry.TriangleMesh(
+                    vertices=o3d.utility.Vector3dVector(vertices),
+                    triangles=o3d.utility.Vector3iVector(faces))
+                mesh.compute_vertex_normals()
+                vertex_normals = np.asarray(mesh.vertex_normals)
+                rays_d = torch.from_numpy(vertex_normals).to(device)
+                sign = -1.0
+                length = 0.1
+                rays_o = torch.from_numpy(
+                    vertices+sign*length*vertex_normals).to(device)
+                color_list = []
+                batch_size = self.ray_batch_size
+                gt_depth = torch.zeros(vertices.shape[0]).to(device)
+                gt_depth[:] = length
+                for i in range(0, rays_d.shape[0], batch_size):
+                    rays_d_batch = rays_d[i:i+batch_size]
+                    rays_o_batch = rays_o[i:i+batch_size]
+                    gt_depth_batch = gt_depth[i:i+batch_size]
+                    depth, uncertainty, color = self.renderer.render_batch_ray(
+                        c, decoders, rays_d_batch, rays_o_batch, device, 
+                        stage='color', gt_depth=gt_depth_batch)
+                    color_list.append(color)
+                color = torch.cat(color_list, dim=0)
+                vertex_colors = color.cpu().numpy()
+
+            
+
+            # TRIMESH SAVE MESH
+            # seen_mask, forecast_mask, unseen_mask = self.point_masks(
+            #             vertices, keyframe_dict, estimate_c2w_list, idx, device=device,
+            #             get_mask_use_all_frames=get_mask_use_all_frames)
+            # vertex_colors = np.clip(vertex_colors, 0, 1) * 255
+            # vertex_colors = vertex_colors.astype(np.uint8)
+            # up_mask = up_mask & ~seen_mask
+            # vertex_colors[up_mask, 0] = 0
+            # vertex_colors[up_mask, 1] = 255
+            # vertex_colors[up_mask, 2] = 255
+            # mesh = trimesh.Trimesh(vertices, faces, vertex_colors=vertex_colors)
+            # mesh.export(mesh_out_file)
+
+
+            
+            # up_mask, down_mask, left_mask, right_mask = self.point_masks_ca(
+            #     points, keyframe_dict, estimate_c2w_list, idx, device=device, 
+            #     get_mask_use_all_frames=get_mask_use_all_frames)
+
+
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(seen_points)
+            # o3d.io.write_point_cloud("seen_mask.ply", pcd)
+
+
+
+            vertex_colors = np.clip(vertex_colors, 0, 1)
+
+
+            vertices /= self.scale
+
+            import open3d as o3d
+            import os
+
+            mesh_o3d = o3d.geometry.TriangleMesh(
+                    o3d.utility.Vector3dVector(vertices),
+                    o3d.utility.Vector3iVector(faces))
+            mesh_o3d.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+            o3d.io.write_triangle_mesh(mesh_out_file,mesh_o3d)
+            H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
+
+            # fx_big = (W/2)*np.tan((np.rad2deg(2*np.arctan(W/(2*fy)))+20)/2)**(-1)
+            # fy_big = (H/2)*np.tan((np.rad2deg(2*np.arctan(W/(2*fx)))+20)/2)**(-1)
+            # camera_intrinsics_big = o3d.camera.PinholeCameraIntrinsic(W, H, fx_big, fy_big, cx, cy)
+
+            # H_big = int(np.tan(np.deg2rad(np.rad2deg(np.arctan(self.H/(2*self.fy)))+10))*self.fy*2)
+            # W_big= int(np.tan(np.deg2rad(np.rad2deg(np.arctan(self.W/(2*self.fx)))+10))*self.fx*2)
+
+
+            camera_intrinsics = o3d.camera.PinholeCameraIntrinsic(W, H, fx, fy, cx, cy)
+            render = o3d.visualization.rendering.OffscreenRenderer(
+                        W, H, headless=True)
+            mtl = o3d.visualization.rendering.MaterialRecord()
+            mtl.base_color = [1, 1, 1, 1]
+            mtl.shader = "defaultUnlit"
+            # render.scene.set_lighting(o3d.visualization.rendering.Open3DScene.LightingProfile.NO_SHADOWS, np.array([0, 0, -1]))
+            render.scene.set_background([0, 0, 0, 0])
+            render.scene.add_geometry("model", mesh_o3d, mtl)
+
+            c2w = keyframe_dict[-1]["gt_c2w"].numpy()
+
+
+
+            # convert to open3d camera pose
+            list = candidate_generate_np(c2w, move = self.move)
+            # list = candidate_generate(c2w, move=10) # need to be updates
+            candidate = ["y+degree","y-degree","x+degree","x-degree"]
+            os.makedirs(f'{image_out_file}', exist_ok=True)
+            save_dir = os.path.join(image_out_file, f'{idx:05d}')
+            os.makedirs(f'{save_dir}', exist_ok=True)
+
+            np.savetxt(os.path.join(save_dir,"camera_pose.txt"),c2w)
+
+            candidate_color = []
+            candidate_depth = []
+
+
+
+            for i in range(len((candidate))):
+
+                c2w = list[i]
+                c2w[:3, 1] *= -1.0
+                c2w[:3, 2] *= -1.0
+                w2c = np.linalg.inv(c2w)
+
+                render.setup_camera(camera_intrinsics,w2c)
+                dimg = render.render_to_depth_image(True)
+                cimg = render.render_to_image()
+                cimg = np.asarray(cimg)
+
+                dimg = np.asarray(dimg)
+                dimg[np.isinf(dimg)]=0
+
+
+                candidate_color.append(cimg)
+                candidate_depth.append(dimg)
+
+                plt.imsave(os.path.join(save_dir, f'depth_{candidate[i]}.png'),dimg)
+                # o3d.io.write_image(os.path.join(save_dir, f'rgb_{candidate[i]}.jpg'), cimg)
+                plt.imsave(os.path.join(save_dir, f'rgb_{candidate[i]}.jpg'), cimg)
+
+            camera_intrinsics = o3d.camera.PinholeCameraIntrinsic(W, H, fx, fy, cx, cy)
+            render_1 = o3d.visualization.rendering.OffscreenRenderer(
+                        W, H, headless=True)
+            mtl = o3d.visualization.rendering.MaterialRecord()
+            mtl.base_color = [1, 1, 1, 1]
+            mtl.shader = "defaultUnlit"
+            # render.scene.set_lighting(o3d.visualization.rendering.Open3DScene.LightingProfile.NO_SHADOWS, np.array([0, 0, -1]))
+            render_1.scene.set_background([0, 0, 0, 0])
+            render_1.scene.add_geometry("model", mesh_o3d, mtl)
+            import copy
+            c2w = copy.deepcopy(keyframe_dict[-1]["gt_c2w"].numpy())
+            c2w[:3, 1] *= -1.0
+            c2w[:3, 2] *= -1.0
+            w2c = np.linalg.inv(c2w)
+            render.setup_camera(camera_intrinsics,w2c)
+            near_plane = render.scene.camera.get_near()
+            far_plane = render.scene.camera.get_far()
+            fov_type = o3d.visualization.rendering.Camera.FovType.Vertical
+            render.scene.camera.set_projection(render.scene.camera.get_field_of_view()+20.0,W/H,near_plane,far_plane,fov_type)
+            dimg = render.render_to_depth_image(True)
+            cimg = render.render_to_image()
+            cimg = np.asarray(cimg)
+            dimg = np.asarray(dimg)
+
+            np.save(os.path.join(save_dir, f'depth_big.npy'), np.clip(np.asarray(dimg),0,far_plane))
+            np.save(os.path.join(save_dir, f'rgb_big.npy'), cimg)
+
+            dimg[np.isinf(dimg)]=0
+            plt.imsave(os.path.join(save_dir, f'depth_big.png'), dimg)
+            plt.imsave(os.path.join(save_dir, f'rgb_big.jpg'), cimg)
+
+            return candidate_color, candidate_depth, cimg, dimg

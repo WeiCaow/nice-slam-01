@@ -29,6 +29,9 @@ class NICE_SLAM():
         self.args = args
         self.nice = args.nice
 
+        # NBV Candidate
+        self.candidate = []
+
         self.coarse = cfg['coarse']
         self.occupancy = cfg['occupancy']
         self.low_gpu_mem = cfg['low_gpu_mem']
@@ -72,6 +75,13 @@ class NICE_SLAM():
 
         self.gt_c2w_list = torch.zeros((self.n_img, 4, 4))
         self.gt_c2w_list.share_memory_()
+
+        # Temporarily set the step to 100
+        self.nbv_step = cfg['NBV_Step']
+        self.nbv_c2w_list = torch.zeros((self.nbv_step, 4, 4))
+        self.nbv_c2w_list.share_memory_()
+
+
         self.idx = torch.zeros((1)).int()
         self.idx.share_memory_()
         self.mapping_first_frame = torch.zeros((1)).int()
