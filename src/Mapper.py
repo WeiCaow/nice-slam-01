@@ -643,7 +643,13 @@ class Mapper(object):
             idx = 0
             cfg = self.cfg
             H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
-            mesh = o3d.io.read_triangle_mesh(glob.glob(os.path.join(self.cfg['data']['input_folder'],"*.ply"))[0])
+
+            # scannet
+            # mesh = o3d.io.read_triangle_mesh(glob.glob(os.path.join(self.cfg['data']['input_folder'],"*.ply"))[0])
+
+            # replica
+            mesh = o3d.io.read_point_cloud(os.path.join("/home/cao/Desktop/nice-slam-01/Datasets/Replica",f"{os.path.basename(self.cfg['data']['input_folder'])}_mesh.ply"))
+
             camera_intrinsics = o3d.camera.PinholeCameraIntrinsic(W, H, fx, fy, cx, cy)
             render = o3d.visualization.rendering.OffscreenRenderer(
                         W, H, headless=True)
@@ -654,13 +660,19 @@ class Mapper(object):
             render.scene.set_background([0, 0, 0, 0])
             render.scene.add_geometry("model", mesh, mtl)
             
-            
-            self.c2w = np.loadtxt(os.path.join(self.cfg['data']['input_folder'],"pose","0.txt"))
+            # scannet
+            # self.c2w = np.loadtxt(os.path.join(self.cfg['data']['input_folder'],"pose","0.txt"))
+
+            # replica
+            _,_,_,self.c2w = self.frame_reader[0]
 
             c2w = self.c2w
-            # c2w[:3, 1] *= -1.0
-            # c2w[:3, 2] *= -1.0
-            w2c = np.linalg.inv(c2w)
+
+            # scannet不要下面两行
+            c2w[:3, 1] *= -1.0
+            c2w[:3, 2] *= -1.0
+
+            w2c = np.linalg.inv(c2w.cpu())
 
             render.setup_camera(camera_intrinsics,w2c)
             dimg = render.render_to_depth_image(True)
@@ -674,6 +686,8 @@ class Mapper(object):
             gt_color = torch.tensor(cimg).to(self.device)
             gt_depth = torch.tensor(dimg).to(self.device)
             gt_c2w = torch.tensor(c2w).to(self.device)
+
+            # replica不要下面两行
             gt_c2w[:3, 1] *= -1.0
             gt_c2w[:3, 2] *= -1.0
 

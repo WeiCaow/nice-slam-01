@@ -14,23 +14,23 @@ from candidate_renderer import headless_render, headless_render_cadidate, candid
 
 # pose_dir = "/home/cao/Desktop/nice-slam-01/Datasets/scannet/scans/scene0000_00/pose"
 
-mesh_dir = "/home/cao/Desktop/nice-slam-01/Datasets/scannet/scans/scene0000_00/scene0000_00_vh_clean.ply"
-mesh = o3d.io.read_triangle_mesh(mesh_dir)
+mesh_dir = "/home/cao/Desktop/nice-slam-01/Datasets/Replica/office2_mesh.ply"
+mesh = o3d.io.read_point_cloud(mesh_dir)
 
-output_dir = "/home/cao/Desktop/nice-slam-01/output/scannet/scans/scene0000_00"
-pose_dir = "/home/cao/Desktop/nice-slam-01/output/scannet/scans/scene0000_00/NBV_render"
+output_dir = "/home/cao/Desktop/nice-slam-01/output/Replica/office2"
+pose_dir = "/home/cao/Desktop/nice-slam-01/output/Replica/office2/NBV_render"
 
 dirs = sorted(os.listdir(pose_dir))
 
 pose_list = []
 for dir in dirs:
   a = np.loadtxt(glob.glob(os.path.join(pose_dir,dir,"*.txt"))[0])
-  # a[:3, 1] *= -1
-  # a[:3, 2] *= -1
+  a[:3, 1] *= -1
+  a[:3, 2] *= -1
   pose_list.append(a)
   # pose_list.append(np.loadtxt(os.path.join(pose_dir,dir)))
 
-pcd_num, pcd = headless_pcd_render(mesh,pose_list[:100])
+pcd_num, pcd = headless_pcd_render(mesh,pose_list[:50])
 
 
 plt.plot(range(len(pcd_num)),pcd_num)

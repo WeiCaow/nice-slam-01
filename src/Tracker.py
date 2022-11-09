@@ -271,17 +271,17 @@ class Tracker(object):
         else:
 
             for idx in range(self.nbv_step):
-                H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
-                mesh = o3d.io.read_triangle_mesh(glob.glob(os.path.join(self.cfg['data']['input_folder'],"*.ply"))[0])
-                camera_intrinsics = o3d.camera.PinholeCameraIntrinsic(W, H, fx, fy, cx, cy)
-                render = o3d.visualization.rendering.OffscreenRenderer(
-                            W, H, headless=True)
-                mtl = o3d.visualization.rendering.MaterialRecord()
-                mtl.base_color = [1, 1, 1, 1]
-                mtl.shader = "defaultUnlit"
-                # render.scene.set_lighting(o3d.visualization.rendering.Open3DScene.LightingProfile.NO_SHADOWS, np.array([0, 0, -1]))
-                render.scene.set_background([0, 0, 0, 0])
-                render.scene.add_geometry("model", mesh, mtl)
+                # H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
+                # mesh = o3d.io.read_triangle_mesh(glob.glob(os.path.join(self.cfg['data']['input_folder'],"*.ply"))[0])
+                # camera_intrinsics = o3d.camera.PinholeCameraIntrinsic(W, H, fx, fy, cx, cy)
+                # render = o3d.visualization.rendering.OffscreenRenderer(
+                #             W, H, headless=True)
+                # mtl = o3d.visualization.rendering.MaterialRecord()
+                # mtl.base_color = [1, 1, 1, 1]
+                # mtl.shader = "defaultUnlit"
+                # # render.scene.set_lighting(o3d.visualization.rendering.Open3DScene.LightingProfile.NO_SHADOWS, np.array([0, 0, -1]))
+                # render.scene.set_background([0, 0, 0, 0])
+                # render.scene.add_geometry("model", mesh, mtl)
 
                 if self.sync_method == 'strict':
                     # strictly mapping and then tracking
@@ -290,21 +290,21 @@ class Tracker(object):
                             while self.mapping_idx[0] != idx-1:
                                 time.sleep(0.1)
                 
-                if idx == 0:
-                    self.c2w = np.loadtxt(os.path.join(self.cfg['data']['input_folder'],"pose","0.txt"))
+                # if idx == 0:
+                    # self.c2w = np.loadtxt(os.path.join(self.cfg['data']['input_folder'],"pose","0.txt"))
 
-                    c2w = self.c2w
-                    # c2w[:3, 1] *= -1.0
-                    # c2w[:3, 2] *= -1.0
-                    w2c = np.linalg.inv(c2w)
+                    # c2w = self.c2w
+                    # # c2w[:3, 1] *= -1.0
+                    # # c2w[:3, 2] *= -1.0
+                    # w2c = np.linalg.inv(c2w)
 
-                    render.setup_camera(camera_intrinsics,w2c)
-                    dimg = render.render_to_depth_image(True)
-                    cimg = render.render_to_image()
-                    cimg = np.asarray(cimg)
+                    # render.setup_camera(camera_intrinsics,w2c)
+                    # dimg = render.render_to_depth_image(True)
+                    # cimg = render.render_to_image()
+                    # cimg = np.asarray(cimg)
 
-                    dimg = np.asarray(dimg)
-                    dimg[np.isinf(dimg)]=0
+                    # dimg = np.asarray(dimg)
+                    # dimg[np.isinf(dimg)]=0
 
 
 
@@ -314,8 +314,7 @@ class Tracker(object):
 
 
 
-                else:
-                    pass
+               
                 
                 self.idx[0] = idx
                 if self.low_gpu_mem:

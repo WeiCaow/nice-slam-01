@@ -8,11 +8,11 @@ for dir in dirs:
   if not os.path.isdir(os.path.join(image_dir,dir)):
     dirs.remove(dir)
 
-for dir in sorted(dirs)[-1:]:
+for dir in sorted(dirs)[2:10]:
   print(dir)
   config = os.path.join("configs/ScanNet",f"{dir}.yaml")
   
-  os.system(f'python run.py {config}')             
+  os.system(f'python src/utils/mesh_reconstruction.py {config}')             
 
 # 50_02 还没有处理: 删掉了
 # 测试一下51_00
