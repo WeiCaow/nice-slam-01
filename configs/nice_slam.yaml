@@ -119,3 +119,4 @@ model:
 
 NBV: True
 NBV_Step : 100
+Metrics: variance

@@ -15,7 +15,7 @@ from src.common import (get_camera_from_tensor, get_samples,
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
 from src.utils.Metrics import Metrics
-from src.utils.candidate_renderer import candidate_generate_np, NRSS
+from src.utils.candidate_renderer import *
 
 
 class Mapper(object):
@@ -29,6 +29,7 @@ class Mapper(object):
 
         self.cfg = cfg
         self.NBV = cfg['NBV']
+        self.metric = cfg['Metrics']
         self.args = args
         self.coarse_mapper = coarse_mapper
 
@@ -720,7 +721,9 @@ class Mapper(object):
                              break
                         time.sleep(0.1)
                     # current_c2w = list[self.candiadate[-1]]
-                    current_c2w = list[-1]
+                    # -1 right
+                    # 0 up
+                    current_c2w = list[0]
 
                     current_c2w[:3, 1] *= -1.0
                     current_c2w[:3, 2] *= -1.0
@@ -804,7 +807,7 @@ class Mapper(object):
 
                     mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
                     
-                    candidate_color, candidate_depth, cimg_big, dimg_big = self.mesher.get_NBV(os.path.join(self.output, 'NBV_render'),mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                    candidate_color, candidate_depth, cimg_big, dimg_big = self.mesher.get_NBV(os.path.join(self.output, 'NBV_render', self.metric),mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
                                             idx,  self.device, show_forecast=self.mesh_coarse_level,
                                             clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
 
@@ -840,7 +843,10 @@ class Mapper(object):
 
                     for i,img in enumerate(candidate_depth):
 
-                        scores.append(NRSS(img,depth=True))
+                        if self.metric == "NRSS":
+                            scores.append(NRSS(img,depth=True))
+                        elif self.metric == "variance":
+                            scores.append(variance(img,depth=True))
 
                     self.candiadate.append(np.argmin(scores))
 
