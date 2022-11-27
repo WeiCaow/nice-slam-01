@@ -118,5 +118,9 @@ model:
 
 
 NBV: True
-NBV_Step : 100
-Metrics: variance
+NBV_Step : 5
+Metrics: NRSS_RGB_argmax
+
+
+
+# 预处理，前三个都试试，NN也试试

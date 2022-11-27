@@ -26,7 +26,7 @@ def compare(nbv_dir,metrics_dir,scans_dir):
       metric_order = np.argsort(pd.read_csv(frame_dir, index_col=0).to_numpy(), axis=0)
       nbv_dir = os.path.join(scans_dir,dir,"nbv",f"{frame}.txt")
       nbv = np.loadtxt(nbv_dir)
-      nbv = np.argsort(nbv)[::-1]
+      nbv = np.argsort(nbv)
 
 
       nbv = nbv[:,None].repeat(metric_order.shape[-1], axis=1)

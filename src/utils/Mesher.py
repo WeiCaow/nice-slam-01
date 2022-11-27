@@ -1797,7 +1797,7 @@ class Mesher(object):
                     o3d.utility.Vector3dVector(vertices),
                     o3d.utility.Vector3iVector(faces))
             mesh_o3d.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
-            o3d.io.write_triangle_mesh(mesh_out_file,mesh_o3d)
+            # o3d.io.write_triangle_mesh(mesh_out_file,mesh_o3d)
             H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
 
             # fx_big = (W/2)*np.tan((np.rad2deg(2*np.arctan(W/(2*fy)))+20)/2)**(-1)

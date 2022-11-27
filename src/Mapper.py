@@ -29,6 +29,8 @@ class Mapper(object):
 
         self.cfg = cfg
         self.NBV = cfg['NBV']
+        self.nbv_step = cfg['NBV_Step']
+
         self.metric = cfg['Metrics']
         self.args = args
         self.coarse_mapper = coarse_mapper
@@ -720,10 +722,11 @@ class Mapper(object):
                         if len(self.candiadate)!=0:
                              break
                         time.sleep(0.1)
+                    from random import choice
                     # current_c2w = list[self.candiadate[-1]]
-                    # -1 right
-                    # 0 up
-                    current_c2w = list[0]
+                    current_c2w = choice(list)
+
+
 
                     current_c2w[:3, 1] *= -1.0
                     current_c2w[:3, 2] *= -1.0
@@ -841,24 +844,27 @@ class Mapper(object):
 
                     scores = []
 
-                    for i,img in enumerate(candidate_depth):
+                    for i in range(4):
+                        # 0 Up 1 Down 2 Left 3 Right
+                        if "NRSS_RGB" in self.metric:
+                            scores.append(NRSS(candidate_color[i],depth=False))
+                        elif "NRSS_Depth" in self.metric:
+                            scores.append(NRSS(candidate_depth[i],depth=True))
+                        elif "SVD_RGB" in self.metric:
+                            scores.append(get_blur_degree(candidate_color[i],depth=False))
+                        elif "SVD_Depth" in self.metric:
+                            scores.append(get_blur_degree(candidate_depth[i],depth=True))
 
-                        if self.metric == "NRSS":
-                            scores.append(NRSS(img,depth=True))
-                        elif self.metric == "variance":
-                            scores.append(variance(img,depth=True))
+                    # x- : right
+                    # 取4个方向里分数最小的做为NBV
+                    if "argmax" in self.metric:
+                        self.candiadate.append(np.argmax(scores))
 
-                    self.candiadate.append(np.argmin(scores))
+                    elif "argmin" in self.metric:
+                        self.candiadate.append(np.argmin(scores))
 
                     print(idx," ",np.argmin(scores))
-                    
-# 接下来任务：把这个NBV传到下一帧，然后循环起来，就结束了，啊，好累，估计还要三四天的工作量
-                    
-                    
 
-
-            
-# 再接下来的任务
-    # 比较一下Coarse和普通的区别
-    # 确定一下他朝着正确的地方走
-    # 输出图像
+                if idx == self.nbv_step-1:
+                    break
+                    

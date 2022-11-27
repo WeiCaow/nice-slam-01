@@ -430,8 +430,7 @@ def candidate_generate_np(camera_extrinsics_origin, move = int):
 
     camera_extrinsics_list = []
     origin = copy.deepcopy(camera_extrinsics_origin)
-    # origin[:, 1] *= -1
-    # origin[:, 2] *= -1
+
 
     for i in range(4):
         camera_extrinsics_ca = copy.deepcopy(origin)

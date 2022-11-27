@@ -15,8 +15,8 @@ from candidate_renderer import headless_render, headless_render_cadidate, candid
 mesh_dir = "/home/cao/Desktop/nice-slam-01/Datasets/Replica/office2_mesh.ply"
 mesh = o3d.io.read_point_cloud(mesh_dir)
 
-output_dir = "/home/cao/Desktop/nice-slam-01/output/Replica/office2/NBV_render/variance"
-pose_dir = "/home/cao/Desktop/nice-slam-01/output/Replica/office2/NBV_render/variance"
+output_dir = "/home/cao/Desktop/nice-slam-01/output/Replica/office2/NBV_render/NRSS_RGB"
+pose_dir = "/home/cao/Desktop/nice-slam-01/output/Replica/office2/NBV_render/NRSS_RGB"
 
 dirs = sorted(os.listdir(pose_dir))
 
